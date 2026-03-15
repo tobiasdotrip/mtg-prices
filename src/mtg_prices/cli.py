@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import io
 import logging
 import logging.handlers
 import os
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -27,7 +29,14 @@ def _default_data_dir() -> Path:
     return base / "mtg-prices"
 
 
-console = Console(force_terminal=True)
+def _make_console() -> Console:
+    """Create a Rich Console that works on Windows (cp1252 terminals)."""
+    if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") != "utf8":
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    return Console()
+
+
+console = _make_console()
 
 
 def _get_db_path() -> Path:

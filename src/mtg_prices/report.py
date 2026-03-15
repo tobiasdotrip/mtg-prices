@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import logging
+import sys
 from datetime import date, timedelta
 
 from rich.console import Console
@@ -86,7 +87,9 @@ def build_reports(
 
 def print_table(reports: list[CardReport], days: list[int], currency: str = "usd") -> None:
     symbol = CURRENCY_SYMBOLS.get(currency, "$")
-    console = Console(force_terminal=True)
+    if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") != "utf8":
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    console = Console()
     table = Table(show_footer=True)
 
     table.add_column("Qté", justify="right", footer="")
