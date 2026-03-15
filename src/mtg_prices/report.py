@@ -30,10 +30,11 @@ def build_reports(
     currency: str = "usd",
     skip_basics: bool = False,
     today: date | None = None,
+    card_list: list | None = None,
 ) -> list[CardReport]:
     today = today or date.today()
     price_field = f"price_{currency}"
-    cards = db.get_all_cards()
+    cards = card_list if card_list is not None else db.get_all_cards()
     reports: list[CardReport] = []
 
     for card in cards:
@@ -42,9 +43,6 @@ def build_reports(
         latest = db.get_latest_price(card.id)
         if latest is None:
             continue
-        # Note: if latest fetch is older than today, trends are computed
-        # relative to that date, not today. This is intentional — we can't
-        # invent a price. Log a warning so the user knows data may be stale.
         if latest.fetched_at != today:
             logger.info(
                 "Latest price for %r is from %s, not today",
@@ -85,14 +83,19 @@ def build_reports(
     return reports
 
 
-def print_table(reports: list[CardReport], days: list[int], currency: str = "usd") -> None:
+def print_table(
+    reports: list[CardReport],
+    days: list[int],
+    currency: str = "usd",
+    title: str | None = None,
+) -> None:
     symbol = CURRENCY_SYMBOLS.get(currency, "$")
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     console = Console(force_terminal=True)
-    table = Table(show_footer=True)
+    table = Table(show_footer=True, title=title)
 
-    table.add_column("Qté", justify="right", footer="")
+    table.add_column("Qte", justify="right", footer="")
     table.add_column("Carte", footer="TOTAL")
     table.add_column("Prix", justify="right", footer="")
     table.add_column("Ext", justify="center")
@@ -124,7 +127,6 @@ def print_table(reports: list[CardReport], days: list[int], currency: str = "usd
             *trend_cols,
         )
 
-    # Update footer
     table.columns[0].footer = str(total_qty)
     table.columns[2].footer = f"{symbol}{total_price:.2f}"
 

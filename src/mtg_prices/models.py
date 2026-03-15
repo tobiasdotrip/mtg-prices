@@ -24,6 +24,12 @@ class PriceEntry:
 
 
 @dataclass
+class Deck:
+    name: str
+    id: int | None = None
+
+
+@dataclass
 class CardReport:
     name: str
     quantity: int

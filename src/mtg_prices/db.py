@@ -4,7 +4,7 @@ import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
 
-from mtg_prices.models import Card, PriceEntry
+from mtg_prices.models import Card, Deck, PriceEntry
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS cards (
@@ -26,6 +26,18 @@ CREATE TABLE IF NOT EXISTS prices (
 );
 
 CREATE INDEX IF NOT EXISTS idx_prices_card_date ON prices(card_id, fetched_at);
+
+CREATE TABLE IF NOT EXISTS decks (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS deck_cards (
+    deck_id INTEGER NOT NULL REFERENCES decks(id),
+    card_id INTEGER NOT NULL REFERENCES cards(id),
+    quantity INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(deck_id, card_id)
+);
 """
 
 
@@ -137,3 +149,49 @@ class Database:
             Card(id=r[0], name=r[1], oracle_id=r[2], quantity=r[3])
             for r in rows
         ]
+
+    def upsert_deck(self, name: str) -> int:
+        self.conn.execute(
+            "INSERT INTO decks (name) VALUES (?) ON CONFLICT(name) DO NOTHING",
+            (name,),
+        )
+        self.conn.commit()
+        row = self.conn.execute("SELECT id FROM decks WHERE name = ?", (name,)).fetchone()
+        return row[0]
+
+    def add_card_to_deck(self, deck_id: int, card_id: int, quantity: int) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO deck_cards (deck_id, card_id, quantity)
+            VALUES (?, ?, ?)
+            ON CONFLICT(deck_id, card_id) DO UPDATE SET quantity = excluded.quantity
+            """,
+            (deck_id, card_id, quantity),
+        )
+        self.conn.commit()
+
+    def get_deck_cards(self, deck_id: int) -> list[Card]:
+        rows = self.conn.execute(
+            """
+            SELECT c.id, c.name, c.oracle_id, dc.quantity
+            FROM cards c
+            JOIN deck_cards dc ON dc.card_id = c.id
+            WHERE dc.deck_id = ?
+            ORDER BY c.name
+            """,
+            (deck_id,),
+        ).fetchall()
+        return [
+            Card(id=r[0], name=r[1], oracle_id=r[2], quantity=r[3])
+            for r in rows
+        ]
+
+    def get_all_decks(self) -> list[Deck]:
+        rows = self.conn.execute("SELECT id, name FROM decks ORDER BY name").fetchall()
+        return [Deck(id=r[0], name=r[1]) for r in rows]
+
+    def get_deck_by_name(self, name: str) -> Deck | None:
+        row = self.conn.execute("SELECT id, name FROM decks WHERE name = ?", (name,)).fetchone()
+        if row is None:
+            return None
+        return Deck(id=row[0], name=row[1])

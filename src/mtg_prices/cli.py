@@ -75,7 +75,8 @@ def main() -> None:
 
 @main.command()
 @click.argument("decklist", type=click.Path(exists=True, path_type=Path))
-def fetch(decklist: Path) -> None:
+@click.option("--deck", default=None, help="Associate cards with a named deck")
+def fetch(decklist: Path, deck: str | None) -> None:
     """Fetch prices from Scryfall for cards in DECKLIST file."""
     cards = parse_decklist(decklist)
     if not cards:
@@ -85,6 +86,11 @@ def fetch(decklist: Path) -> None:
     db = Database(_get_db_path())
     db.init()
     client = ScryfallClient()
+
+    deck_id = None
+    if deck:
+        deck_id = db.upsert_deck(deck)
+        console.print(f"[bold]Deck:[/bold] {deck}\n")
 
     today = date.today()
     fetched = 0
@@ -99,6 +105,9 @@ def fetch(decklist: Path) -> None:
 
             card.oracle_id = result.get("oracle_id")
             card_id = db.upsert_card(card)
+
+            if deck_id is not None:
+                db.add_card_to_deck(deck_id, card_id, card.quantity)
 
             entry = PriceEntry(
                 card_id=card_id,
@@ -124,12 +133,14 @@ def fetch(decklist: Path) -> None:
 @click.option("--currency", type=click.Choice(["usd", "eur"]), default="usd")
 @click.option("--days", default="7,30", help="Trend windows, comma-separated (e.g. 7,30,90)")
 @click.option("--skip-basics", is_flag=True, default=False, help="Exclude basic lands")
+@click.option("--deck", default=None, help="Report for a specific deck only")
 def report(
     fmt: str | None,
     output_path: Path | None,
     currency: str,
     days: str,
     skip_basics: bool,
+    deck: str | None,
 ) -> None:
     """Show price trends for tracked cards."""
     day_list = [int(d.strip()) for d in days.split(",")]
@@ -138,12 +149,24 @@ def report(
     db.init()
 
     try:
-        reports = build_reports(db, days=day_list, currency=currency, skip_basics=skip_basics)
+        card_list = None
+        if deck:
+            deck_obj = db.get_deck_by_name(deck)
+            if deck_obj is None:
+                console.print(f"[red]Deck '{deck}' not found.[/red]")
+                return
+            card_list = db.get_deck_cards(deck_obj.id)
+
+        reports = build_reports(
+            db, days=day_list, currency=currency,
+            skip_basics=skip_basics, card_list=card_list,
+        )
         if not reports:
             console.print("[yellow]No price data available. Run 'fetch' first.[/yellow]")
             return
 
-        print_table(reports, days=day_list, currency=currency)
+        title = f"Deck: {deck}" if deck else None
+        print_table(reports, days=day_list, currency=currency, title=title)
 
         if fmt:
             if fmt == "csv":
@@ -164,18 +187,49 @@ def report(
 
 
 @main.command(name="list")
-def list_cards() -> None:
+@click.option("--deck", default=None, help="List cards in a specific deck")
+def list_cards(deck: str | None) -> None:
     """List all tracked cards in the database."""
     db = Database(_get_db_path())
     db.init()
 
     try:
-        cards = db.get_all_cards()
+        if deck:
+            deck_obj = db.get_deck_by_name(deck)
+            if deck_obj is None:
+                console.print(f"[red]Deck '{deck}' not found.[/red]")
+                return
+            cards = db.get_deck_cards(deck_obj.id)
+            label = f"Deck: {deck}"
+        else:
+            cards = db.get_all_cards()
+            label = "All cards"
+
         if not cards:
             console.print("[yellow]No cards tracked yet. Run 'fetch' first.[/yellow]")
             return
+        console.print(f"[bold]{label}[/bold]\n")
         for card in cards:
             console.print(f"  {card.quantity}x {card.name}")
-        console.print(f"\n[bold]{len(cards)} cards tracked.[/bold]")
+        console.print(f"\n[bold]{len(cards)} cards.[/bold]")
+    finally:
+        db.close()
+
+
+@main.command()
+def decks() -> None:
+    """List all tracked decks."""
+    db = Database(_get_db_path())
+    db.init()
+
+    try:
+        all_decks = db.get_all_decks()
+        if not all_decks:
+            console.print("[yellow]No decks yet. Use 'fetch --deck <name>' to create one.[/yellow]")
+            return
+        for d in all_decks:
+            card_count = len(db.get_deck_cards(d.id))
+            console.print(f"  {d.name} ({card_count} cards)")
+        console.print(f"\n[bold]{len(all_decks)} decks.[/bold]")
     finally:
         db.close()
