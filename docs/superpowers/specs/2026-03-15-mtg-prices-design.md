@@ -24,16 +24,21 @@ Fichier texte, une carte par ligne au format `<quantité> <nom de la carte>` :
 
 **Scryfall API** (gratuite, sans clé).
 
+### Normalisation des noms
+
+Avant la recherche exacte, les noms sont normalisés côté client via `unicodedata.normalize('NFKD')` + suppression des diacritiques. Cela permet de gérer les cas comme `Jötun Grunt` tapé `Jotun Grunt`.
+
 ### Stratégie de sélection
 
 Pour chaque carte :
 
-1. Appel `/cards/search?q=!"{name}"&order=released&dir=desc` — le query doit être URL-encodé (noms avec virgules, apostrophes, etc.)
-2. Parcours des 5 éditions les plus récentes (la première page de résultats suffit grâce au tri)
-3. Sélection du prix non-foil (`prices.usd` / `prices.eur`) le plus bas — les prix foil sont ignorés
-4. Les cartes avec `prices.usd: null` sont skippées dans la sélection (pas de prix disponible)
-5. Fallback sur `/cards/named?fuzzy={name}` si la recherche exacte échoue
-6. Cartes à double face (MDFC, split, transform) : on utilise le nom de la face avant uniquement. Scryfall résout correctement `!"Delver of Secrets"` vers la carte complète.
+1. Normalisation du nom (suppression des diacritiques)
+2. Appel `/cards/search?q=!"{name}"&order=released&dir=desc` — le query doit être URL-encodé (noms avec virgules, apostrophes, etc.)
+3. Parcours des 5 éditions les plus récentes (la première page de résultats suffit grâce au tri)
+4. Sélection du prix non-foil (`prices.usd` / `prices.eur`) le plus bas — les prix foil sont ignorés
+5. Les cartes avec `prices.usd: null` sont skippées dans la sélection (pas de prix disponible)
+6. Fallback sur `/cards/named?fuzzy={name}` uniquement si la recherche exacte échoue (filet de sécurité pour typos résiduelles). Le fuzzy retourne une seule carte — on perd la sélection multi-éditions dans ce cas, c'est un compromis accepté.
+7. Cartes à double face (MDFC, split, transform) : on utilise le nom de la face avant uniquement. Scryfall résout correctement `!"Delver of Secrets"` vers la carte complète.
 
 Les prix Scryfall sont des strings (`"72.50"`) — conversion en `float` à l'insertion.
 
@@ -63,7 +68,8 @@ Fichier unique dans `data/mtg_prices.db`.
 CREATE TABLE cards (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
-    scryfall_id TEXT
+    oracle_id TEXT,
+    quantity INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE prices (
@@ -80,7 +86,10 @@ CREATE TABLE prices (
 CREATE INDEX idx_prices_card_date ON prices(card_id, fetched_at);
 ```
 
+- `oracle_id` : identifiant stable par carte (indépendant de l'édition), remplace `scryfall_id`
+- `quantity` : stockée en DB, mise à jour à chaque `fetch` depuis le fichier
 - Une entrée par carte par jour (`UNIQUE(card_id, fetched_at)`)
+- Dates au format ISO 8601 (`YYYY-MM-DD`)
 - Upsert via `INSERT ... ON CONFLICT(card_id, fetched_at) DO UPDATE SET ...` si on relance le fetch le même jour (préserve l'id de la ligne)
 - USD et EUR stockés
 
@@ -91,22 +100,30 @@ Package installable via `pip install -e .` avec entrypoint `mtg-prices`.
 ### Commandes
 
 ```bash
-# Scrape les prix et stocke en DB
+# Scrape les prix et stocke en DB (quantités mises à jour depuis le fichier)
 mtg-prices fetch cards.txt
 
-# Affiche les tendances + export optionnel
-mtg-prices report cards.txt
-mtg-prices report cards.txt --format csv
-mtg-prices report cards.txt --format json --output prices.json
+# Affiche les tendances (toutes les cartes en DB, quantités depuis la DB)
+mtg-prices report
+mtg-prices report --format csv
+mtg-prices report --format json --output prices.json
+
+# Liste les cartes trackées en DB
+mtg-prices list
+
+# Version
+mtg-prices --version
 ```
 
 ### Options du report
 
-| Option       | Description                              | Défaut                          |
-|-------------|------------------------------------------|---------------------------------|
-| `--format`  | Format d'export (`csv`, `json`)          | Console uniquement              |
-| `--output`  | Chemin du fichier d'export               | `data/export_{date}.{format}`   |
-| `--currency`| Devise (`usd`, `eur`)                   | `usd`                           |
+| Option          | Description                              | Défaut                          |
+|----------------|------------------------------------------|---------------------------------|
+| `--format`     | Format d'export (`csv`, `json`)          | Console uniquement              |
+| `--output`     | Chemin du fichier d'export               | `data/export_{date}.{format}`   |
+| `--currency`   | Devise (`usd`, `eur`)                   | `usd`                           |
+| `--days`       | Fenêtres de tendance (ex: `7,30,90`)    | `7,30`                          |
+| `--skip-basics`| Exclut les terrains de base du report   | `false`                         |
 
 ## Output
 
@@ -125,9 +142,11 @@ mtg-prices report cards.txt --format json --output prices.json
 ```
 
 - Tendances colorées : vert (hausse), rouge (baisse)
-- Historique insuffisant (< 7j ou < 30j) : affiche `—`
+- Historique insuffisant : affiche `—`
 - Trié par prix décroissant
 - Extension en code court (ONE, DMR, CMM, etc.)
+- Symbole de devise adapté au `--currency` (`$` / `€`)
+- Devise demandée absente (`null`) : affiche `—` avec warning
 
 ### Export CSV
 
@@ -186,18 +205,17 @@ mtg-prices/
 
 ### Modules
 
-- **cli.py** — Parsing des arguments, orchestration des commandes `fetch` et `report`
-- **scraper.py** — Client Scryfall : recherche de cartes, récupération des prix, gestion du rate limit
-- **db.py** — Init DB, insertion des prix, requêtes de tendance (prix à J-7, J-30)
-- **report.py** — Construction du tableau Rich, export CSV/JSON
+- **cli.py** — Parsing des arguments, orchestration des commandes `fetch`, `report`, `list`
+- **scraper.py** — Client Scryfall : normalisation des noms, recherche de cartes, récupération des prix, gestion du rate limit
+- **db.py** — Init DB, insertion des prix et quantités, requêtes de tendance (prix à J-N)
+- **report.py** — Construction du tableau Rich, export CSV/JSON, filtrage basics
 - **models.py** — Dataclasses `Card`, `PriceEntry`, `CardReport`
 
 ## Calcul des tendances
 
 Formule : `(prix_aujourd'hui - prix_J-N) / prix_J-N * 100`
 
-- **7j** : prix du jour vs prix il y a 7 jours
-- **30j** : prix du jour vs prix il y a 30 jours
+- Fenêtres configurables via `--days` (défaut : 7, 30)
 - Si le prix exact à J-N est absent, on prend le prix le plus proche disponible dans une fenêtre de ±2 jours
 - Si aucun prix n'est disponible dans la fenêtre : affiche `—`
 
@@ -205,7 +223,8 @@ Formule : `(prix_aujourd'hui - prix_J-N) / prix_J-N * 100`
 
 Logging via le module `logging` de Python :
 - Console : `WARNING` et au-dessus
-- Fichier `data/errors.log` : `INFO` et au-dessus (rotation quotidienne)
+- Fichier `data/errors.log` : `INFO` et au-dessus
+- Rotation quotidienne, rétention de 30 jours (`TimedRotatingFileHandler`, `backupCount=30`)
 
 ## Gestion des erreurs
 
@@ -217,3 +236,4 @@ Logging via le module `logging` de Python :
 | Ligne mal formée            | Warning + skip, continue le reste                         |
 | Pas d'historique suffisant  | Affiche `—` pour les tendances manquantes                 |
 | Prix null sur Scryfall      | Skip dans la sélection, warning si aucun prix disponible  |
+| Devise demandée absente     | Affiche `—` avec warning dans le report                   |
