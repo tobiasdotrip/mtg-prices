@@ -40,6 +40,11 @@ dependencies = [
     "rich>=13.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
 [project.scripts]
 mtg-prices = "mtg_prices.cli:main"
 
@@ -218,6 +223,8 @@ git commit -m "feat: add data models (Card, PriceEntry, CardReport)"
 - Create: `src/mtg_prices/db.py`
 - Create: `tests/test_db.py`
 - Create: `tests/conftest.py`
+
+**Note:** `conftest.py` fixtures are auto-discovered by pytest. Tasks 6 and 7 depend on the `db` fixture defined here — this task must be completed first.
 
 - [ ] **Step 1: Write conftest with in-memory DB fixture**
 
@@ -766,6 +773,12 @@ def normalize_name(name: str) -> str:
 def select_best_price(
     prints: list[dict[str, Any]], max_editions: int = 5
 ) -> dict[str, Any] | None:
+    """Select the cheapest USD price among the most recent editions.
+
+    EUR price returned is from the same edition as the best USD price,
+    not the cheapest EUR across editions. This is intentional — we track
+    by edition, not by individual currency.
+    """
     best: dict[str, Any] | None = None
     best_usd = float("inf")
     for card_data in prints[:max_editions]:
@@ -928,6 +941,16 @@ def test_export_csv():
     assert rows[0]["trend_7d"] == "+3.2%"
 
 
+def test_print_table_does_not_crash():
+    """Smoke test: print_table should not raise on valid input."""
+    from mtg_prices.report import print_table
+    reports = [
+        CardReport(name="Lightning Bolt", quantity=4, price=2.5, set_code="MH3", trends={7: 3.2, 30: None}),
+    ]
+    # Rich prints to console; just verify no exception
+    print_table(reports, days=[7, 30], currency="usd")
+
+
 def test_export_json():
     reports = [
         CardReport(name="Lightning Bolt", quantity=4, price=2.5, set_code="MH3", trends={7: 3.2, 30: None}),
@@ -992,6 +1015,14 @@ def build_reports(
         latest = db.get_latest_price(card.id)
         if latest is None:
             continue
+        # Note: if latest fetch is older than today, trends are computed
+        # relative to that date, not today. This is intentional — we can't
+        # invent a price. Log a warning so the user knows data may be stale.
+        if latest.fetched_at != today:
+            logger.info(
+                "Latest price for %r is from %s, not today",
+                card.name, latest.fetched_at.isoformat(),
+            )
         current_price = getattr(latest, price_field)
         if current_price is None:
             logger.warning("No %s price for %r", currency.upper(), card.name)
@@ -1124,7 +1155,7 @@ git commit -m "feat: add report module with console, CSV, and JSON export"
 
 ```python
 # tests/test_cli.py
-import json
+import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 from click.testing import CliRunner
@@ -1169,9 +1200,6 @@ def test_list_empty(runner, tmp_path):
     with patch("mtg_prices.cli._get_db_path", return_value=db_path):
         result = runner.invoke(main, ["list"])
     assert result.exit_code == 0
-
-
-import pytest
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1200,19 +1228,31 @@ from mtg_prices.parser import parse_decklist
 from mtg_prices.report import build_reports, export_csv, export_json, print_table
 from mtg_prices.scraper import ScryfallClient
 
-_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+def _default_data_dir() -> Path:
+    """Data dir: $XDG_DATA_HOME/mtg-prices or ~/.local/share/mtg-prices."""
+    import os
+    xdg = os.environ.get("XDG_DATA_HOME")
+    if xdg:
+        base = Path(xdg)
+    else:
+        base = Path.home() / ".local" / "share"
+    return base / "mtg-prices"
+
+
 console = Console()
 
 
 def _get_db_path() -> Path:
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    return _DATA_DIR / "mtg_prices.db"
+    data_dir = _default_data_dir()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir / "mtg_prices.db"
 
 
 def _setup_logging() -> None:
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    data_dir = _default_data_dir()
+    data_dir.mkdir(parents=True, exist_ok=True)
     file_handler = logging.handlers.TimedRotatingFileHandler(
-        _DATA_DIR / "errors.log",
+        data_dir / "errors.log",
         when="midnight",
         backupCount=30,
         encoding="utf-8",
@@ -1316,8 +1356,9 @@ def report(
 
             if output_path is None:
                 today = date.today().isoformat()
-                _DATA_DIR.mkdir(parents=True, exist_ok=True)
-                output_path = _DATA_DIR / f"export_{today}.{fmt}"
+                data_dir = _default_data_dir()
+                data_dir.mkdir(parents=True, exist_ok=True)
+                output_path = data_dir / f"export_{today}.{fmt}"
 
             output_path.write_text(content, encoding="utf-8")
             console.print(f"\n[bold]Exported to {output_path}[/bold]")
@@ -1378,6 +1419,8 @@ Run: `pytest -v --tb=short`
 Expected: All PASS
 
 - [ ] **Step 3: Test fetch with real Scryfall (manual smoke test)**
+
+**Note:** This step hits the real Scryfall API. Skip in CI. For local verification only.
 
 Create a test file:
 ```bash
