@@ -86,7 +86,7 @@ def build_reports(
 
 def print_table(reports: list[CardReport], days: list[int], currency: str = "usd") -> None:
     symbol = CURRENCY_SYMBOLS.get(currency, "$")
-    console = Console()
+    console = Console(force_terminal=True)
     table = Table(show_footer=True)
 
     table.add_column("Qté", justify="right", footer="")

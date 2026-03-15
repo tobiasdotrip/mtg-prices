@@ -27,7 +27,7 @@ def _default_data_dir() -> Path:
     return base / "mtg-prices"
 
 
-console = Console()
+console = Console(force_terminal=True)
 
 
 def _get_db_path() -> Path:
@@ -101,7 +101,7 @@ def fetch(decklist: Path) -> None:
             )
             db.upsert_price(entry)
             fetched += 1
-            console.print(f"  [green]✓[/green] {card.name} — ${result.get('price_usd', '?')}")
+            console.print(f"  [green]OK[/green] {card.name} -- ${result.get('price_usd', '?')}")
     finally:
         client.close()
         db.close()
