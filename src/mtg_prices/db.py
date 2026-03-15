@@ -1,0 +1,139 @@
+from __future__ import annotations
+
+import sqlite3
+from datetime import date, timedelta
+from pathlib import Path
+
+from mtg_prices.models import Card, PriceEntry
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS cards (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    oracle_id TEXT,
+    quantity INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS prices (
+    id INTEGER PRIMARY KEY,
+    card_id INTEGER NOT NULL REFERENCES cards(id),
+    price_usd REAL,
+    price_eur REAL,
+    set_code TEXT NOT NULL,
+    set_name TEXT NOT NULL,
+    fetched_at DATE NOT NULL,
+    UNIQUE(card_id, fetched_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_prices_card_date ON prices(card_id, fetched_at);
+"""
+
+
+class Database:
+    def __init__(self, path: str | Path) -> None:
+        self.conn = sqlite3.connect(str(path))
+        self.conn.execute("PRAGMA foreign_keys = ON")
+
+    def init(self) -> None:
+        self.conn.executescript(_SCHEMA)
+
+    def close(self) -> None:
+        self.conn.close()
+
+    def upsert_card(self, card: Card) -> int:
+        self.conn.execute(
+            """
+            INSERT INTO cards (name, oracle_id, quantity)
+            VALUES (?, ?, ?)
+            ON CONFLICT(name) DO UPDATE SET
+                oracle_id = COALESCE(excluded.oracle_id, cards.oracle_id),
+                quantity = excluded.quantity
+            """,
+            (card.name, card.oracle_id, card.quantity),
+        )
+        self.conn.commit()
+        row = self.conn.execute(
+            "SELECT id FROM cards WHERE name = ?", (card.name,)
+        ).fetchone()
+        return row[0]
+
+    def upsert_price(self, entry: PriceEntry) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO prices (card_id, price_usd, price_eur, set_code, set_name, fetched_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(card_id, fetched_at) DO UPDATE SET
+                price_usd = excluded.price_usd,
+                price_eur = excluded.price_eur,
+                set_code = excluded.set_code,
+                set_name = excluded.set_name
+            """,
+            (
+                entry.card_id,
+                entry.price_usd,
+                entry.price_eur,
+                entry.set_code,
+                entry.set_name,
+                entry.fetched_at.isoformat(),
+            ),
+        )
+        self.conn.commit()
+
+    def get_price_at(
+        self, card_id: int, target: date, tolerance_days: int = 2
+    ) -> PriceEntry | None:
+        start = (target - timedelta(days=tolerance_days)).isoformat()
+        end = (target + timedelta(days=tolerance_days)).isoformat()
+        row = self.conn.execute(
+            """
+            SELECT id, card_id, price_usd, price_eur, set_code, set_name, fetched_at
+            FROM prices
+            WHERE card_id = ? AND fetched_at BETWEEN ? AND ?
+            ORDER BY ABS(julianday(fetched_at) - julianday(?))
+            LIMIT 1
+            """,
+            (card_id, start, end, target.isoformat()),
+        ).fetchone()
+        if row is None:
+            return None
+        return PriceEntry(
+            id=row[0],
+            card_id=row[1],
+            price_usd=row[2],
+            price_eur=row[3],
+            set_code=row[4],
+            set_name=row[5],
+            fetched_at=date.fromisoformat(row[6]),
+        )
+
+    def get_latest_price(self, card_id: int) -> PriceEntry | None:
+        row = self.conn.execute(
+            """
+            SELECT id, card_id, price_usd, price_eur, set_code, set_name, fetched_at
+            FROM prices
+            WHERE card_id = ?
+            ORDER BY fetched_at DESC
+            LIMIT 1
+            """,
+            (card_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return PriceEntry(
+            id=row[0],
+            card_id=row[1],
+            price_usd=row[2],
+            price_eur=row[3],
+            set_code=row[4],
+            set_name=row[5],
+            fetched_at=date.fromisoformat(row[6]),
+        )
+
+    def get_all_cards(self) -> list[Card]:
+        rows = self.conn.execute(
+            "SELECT id, name, oracle_id, quantity FROM cards ORDER BY name"
+        ).fetchall()
+        return [
+            Card(id=r[0], name=r[1], oracle_id=r[2], quantity=r[3])
+            for r in rows
+        ]
