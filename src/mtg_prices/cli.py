@@ -30,10 +30,10 @@ def _default_data_dir() -> Path:
 
 
 def _make_console() -> Console:
-    """Create a Rich Console that works on Windows (cp1252 terminals)."""
-    if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") != "utf8":
+    """Create a Rich Console that works on Windows/PowerShell."""
+    if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    return Console()
+    return Console(force_terminal=True)
 
 
 console = _make_console()

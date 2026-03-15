@@ -87,9 +87,9 @@ def build_reports(
 
 def print_table(reports: list[CardReport], days: list[int], currency: str = "usd") -> None:
     symbol = CURRENCY_SYMBOLS.get(currency, "$")
-    if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") != "utf8":
+    if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    console = Console()
+    console = Console(force_terminal=True)
     table = Table(show_footer=True)
 
     table.add_column("Qté", justify="right", footer="")
