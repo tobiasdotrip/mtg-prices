@@ -81,7 +81,7 @@ class ScryfallClient:
         # Exact search — returns all prints
         resp = self._get(
             f"{_BASE_URL}/cards/search",
-            params={"q": f'!"{normalized}"', "order": "released", "dir": "desc"},
+            params={"q": f'!"{normalized}"', "unique": "prints", "order": "released", "dir": "desc"},
         )
         if resp.status_code == 200:
             data = resp.json()
