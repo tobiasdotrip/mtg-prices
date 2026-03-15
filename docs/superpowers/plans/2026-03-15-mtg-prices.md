@@ -141,7 +141,8 @@ def test_card_report_creation():
     report = CardReport(
         name="Lightning Bolt",
         quantity=4,
-        price=2.50,
+        price_usd=2.50,
+        price_eur=2.10,
         set_code="MH3",
         trends={7: 3.2, 30: -1.8},
     )
@@ -153,7 +154,8 @@ def test_card_report_no_trends():
     report = CardReport(
         name="Lightning Bolt",
         quantity=4,
-        price=2.50,
+        price_usd=2.50,
+        price_eur=None,
         set_code="MH3",
         trends={7: None, 30: None},
     )
@@ -198,7 +200,8 @@ class PriceEntry:
 class CardReport:
     name: str
     quantity: int
-    price: float | None
+    price_usd: float | None
+    price_eur: float | None
     set_code: str
     trends: dict[int, float | None] = field(default_factory=dict)
 ```
@@ -885,22 +888,16 @@ import io
 from datetime import date
 
 from mtg_prices.models import Card, PriceEntry, CardReport
-from mtg_prices.report import build_reports, export_csv, export_json
-
-BASIC_LANDS = {"Plains", "Island", "Swamp", "Mountain", "Forest",
-               "Snow-Covered Plains", "Snow-Covered Island", "Snow-Covered Swamp",
-               "Snow-Covered Mountain", "Snow-Covered Forest", "Wastes"}
+from mtg_prices.report import build_reports, export_csv, export_json, print_table
 
 
 def test_build_reports(db):
     card = Card(name="Lightning Bolt", quantity=4)
     card_id = db.upsert_card(card)
-    # Today's price
     db.upsert_price(PriceEntry(
         card_id=card_id, price_usd=3.0, price_eur=2.5,
         set_code="MH3", set_name="Modern Horizons 3", fetched_at=date(2026, 3, 15),
     ))
-    # 7 days ago
     db.upsert_price(PriceEntry(
         card_id=card_id, price_usd=2.5, price_eur=2.0,
         set_code="MH3", set_name="Modern Horizons 3", fetched_at=date(2026, 3, 8),
@@ -909,10 +906,24 @@ def test_build_reports(db):
     assert len(reports) == 1
     r = reports[0]
     assert r.name == "Lightning Bolt"
-    assert r.price == 3.0
+    assert r.price_usd == 3.0
+    assert r.price_eur == 2.5
     assert r.trends[7] is not None
     assert abs(r.trends[7] - 20.0) < 0.01  # (3.0 - 2.5) / 2.5 * 100
-    assert r.trends[30] is None  # no data 30 days ago
+    assert r.trends[30] is None
+
+
+def test_build_reports_null_currency_included(db):
+    """Cards with null price in requested currency should appear with None, not be skipped."""
+    card_id = db.upsert_card(Card(name="US Only Card", quantity=1))
+    db.upsert_price(PriceEntry(
+        card_id=card_id, price_usd=5.0, price_eur=None,
+        set_code="SET", set_name="Some Set", fetched_at=date(2026, 3, 15),
+    ))
+    reports = build_reports(db, days=[7], currency="eur", today=date(2026, 3, 15))
+    assert len(reports) == 1
+    assert reports[0].price_eur is None
+    assert reports[0].trends[7] is None
 
 
 def test_build_reports_skip_basics(db):
@@ -930,35 +941,45 @@ def test_build_reports_skip_basics(db):
 
 def test_export_csv():
     reports = [
-        CardReport(name="Sheoldred, the Apocalypse", quantity=1, price=72.5, set_code="ONE", trends={7: 3.2, 30: -1.8}),
-        CardReport(name="Lightning Bolt", quantity=4, price=2.5, set_code="MH3", trends={7: None, 30: None}),
+        CardReport(name="Sheoldred, the Apocalypse", quantity=1, price_usd=72.5, price_eur=65.0, set_code="ONE", trends={7: 3.2, 30: -1.8}),
+        CardReport(name="Lightning Bolt", quantity=4, price_usd=2.5, price_eur=2.0, set_code="MH3", trends={7: None, 30: None}),
     ]
     output = export_csv(reports, days=[7, 30])
     reader = csv.DictReader(io.StringIO(output))
     rows = list(reader)
     assert len(rows) == 2
     assert rows[0]["name"] == "Sheoldred, the Apocalypse"
+    assert rows[0]["price_usd"] == "72.5"
+    assert rows[0]["price_eur"] == "65.0"
     assert rows[0]["trend_7d"] == "+3.2%"
 
 
-def test_print_table_does_not_crash():
-    """Smoke test: print_table should not raise on valid input."""
-    from mtg_prices.report import print_table
+def test_export_csv_zero_trend():
+    """A trend of exactly 0% should show +0.0%, not —."""
     reports = [
-        CardReport(name="Lightning Bolt", quantity=4, price=2.5, set_code="MH3", trends={7: 3.2, 30: None}),
+        CardReport(name="Bolt", quantity=1, price_usd=2.0, price_eur=None, set_code="M21", trends={7: 0.0}),
     ]
-    # Rich prints to console; just verify no exception
+    output = export_csv(reports, days=[7])
+    assert "+0.0%" in output
+
+
+def test_print_table_does_not_crash():
+    reports = [
+        CardReport(name="Lightning Bolt", quantity=4, price_usd=2.5, price_eur=2.0, set_code="MH3", trends={7: 3.2, 30: None}),
+    ]
     print_table(reports, days=[7, 30], currency="usd")
 
 
 def test_export_json():
     reports = [
-        CardReport(name="Lightning Bolt", quantity=4, price=2.5, set_code="MH3", trends={7: 3.2, 30: None}),
+        CardReport(name="Lightning Bolt", quantity=4, price_usd=2.5, price_eur=2.0, set_code="MH3", trends={7: 3.2, 30: None}),
     ]
     output = export_json(reports, days=[7, 30])
     data = json.loads(output)
     assert len(data) == 1
     assert data[0]["name"] == "Lightning Bolt"
+    assert data[0]["price_usd"] == 2.5
+    assert data[0]["price_eur"] == 2.0
     assert data[0]["trend_7d"] == 3.2
     assert data[0]["trend_30d"] is None
 ```
@@ -1026,30 +1047,35 @@ def build_reports(
         current_price = getattr(latest, price_field)
         if current_price is None:
             logger.warning("No %s price for %r", currency.upper(), card.name)
-            continue
 
         trends: dict[int, float | None] = {}
-        for d in days:
-            target = today - timedelta(days=d)
-            old = db.get_price_at(card.id, target, tolerance_days=2)
-            if old is None:
+        if current_price is not None:
+            for d in days:
+                target = today - timedelta(days=d)
+                old = db.get_price_at(card.id, target, tolerance_days=2)
+                if old is None:
+                    trends[d] = None
+                    continue
+                old_price = getattr(old, price_field)
+                if old_price is None or old_price == 0:
+                    trends[d] = None
+                    continue
+                trends[d] = (current_price - old_price) / old_price * 100
+        else:
+            for d in days:
                 trends[d] = None
-                continue
-            old_price = getattr(old, price_field)
-            if old_price is None or old_price == 0:
-                trends[d] = None
-                continue
-            trends[d] = (current_price - old_price) / old_price * 100
 
         reports.append(CardReport(
             name=card.name,
             quantity=card.quantity,
-            price=current_price,
+            price_usd=latest.price_usd,
+            price_eur=latest.price_eur,
             set_code=latest.set_code,
             trends=trends,
         ))
 
-    reports.sort(key=lambda r: r.price or 0, reverse=True)
+    price_attr = f"price_{currency}"
+    reports.sort(key=lambda r: getattr(r, price_attr) or 0, reverse=True)
     return reports
 
 
@@ -1065,10 +1091,12 @@ def print_table(reports: list[CardReport], days: list[int], currency: str = "usd
     for d in days:
         table.add_column(f"{d}j", justify="right")
 
+    price_attr = f"price_{currency}"
     total_price = 0.0
     total_qty = 0
     for r in reports:
-        total_price += (r.price or 0) * r.quantity
+        price = getattr(r, price_attr)
+        total_price += (price or 0) * r.quantity
         total_qty += r.quantity
         trend_cols = []
         for d in days:
@@ -1083,7 +1111,7 @@ def print_table(reports: list[CardReport], days: list[int], currency: str = "usd
         table.add_row(
             str(r.quantity),
             r.name,
-            f"{symbol}{r.price:.2f}" if r.price else "—",
+            f"{symbol}{price:.2f}" if price is not None else "—",
             r.set_code.upper(),
             *trend_cols,
         )
@@ -1095,23 +1123,29 @@ def print_table(reports: list[CardReport], days: list[int], currency: str = "usd
     console.print(table)
 
 
+def _format_trend(t: float | None) -> str:
+    if t is None:
+        return "—"
+    return f"+{t:.1f}%" if t >= 0 else f"{t:.1f}%"
+
+
 def export_csv(reports: list[CardReport], days: list[int]) -> str:
     output = io.StringIO()
-    fieldnames = ["qty", "name", "price", "set_code"]
+    fieldnames = ["qty", "name", "price_usd", "price_eur", "set_code"]
     for d in days:
         fieldnames.append(f"trend_{d}d")
     writer = csv.DictWriter(output, fieldnames=fieldnames, quoting=csv.QUOTE_NONNUMERIC)
     writer.writeheader()
     for r in reports:
-        row = {
+        row: dict[str, object] = {
             "qty": r.quantity,
             "name": r.name,
-            "price": r.price,
+            "price_usd": r.price_usd,
+            "price_eur": r.price_eur,
             "set_code": r.set_code,
         }
         for d in days:
-            t = r.trends.get(d)
-            row[f"trend_{d}d"] = f"+{t:.1f}%" if t and t >= 0 else f"{t:.1f}%" if t else "—"
+            row[f"trend_{d}d"] = _format_trend(r.trends.get(d))
         writer.writerow(row)
     return output.getvalue()
 
@@ -1119,10 +1153,11 @@ def export_csv(reports: list[CardReport], days: list[int]) -> str:
 def export_json(reports: list[CardReport], days: list[int]) -> str:
     data = []
     for r in reports:
-        entry = {
+        entry: dict[str, object] = {
             "qty": r.quantity,
             "name": r.name,
-            "price": r.price,
+            "price_usd": r.price_usd,
+            "price_eur": r.price_eur,
             "set_code": r.set_code,
         }
         for d in days:
