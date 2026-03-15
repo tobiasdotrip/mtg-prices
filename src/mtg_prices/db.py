@@ -170,6 +170,10 @@ class Database:
         )
         self.conn.commit()
 
+    def clear_deck(self, deck_id: int) -> None:
+        self.conn.execute("DELETE FROM deck_cards WHERE deck_id = ?", (deck_id,))
+        self.conn.commit()
+
     def get_deck_cards(self, deck_id: int) -> list[Card]:
         rows = self.conn.execute(
             """

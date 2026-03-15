@@ -90,6 +90,7 @@ def fetch(decklist: Path, deck: str | None) -> None:
     deck_id = None
     if deck:
         deck_id = db.upsert_deck(deck)
+        db.clear_deck(deck_id)
         console.print(f"[bold]Deck:[/bold] {deck}\n")
 
     today = date.today()
