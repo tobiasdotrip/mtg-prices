@@ -1,4 +1,5 @@
 import pytest
+
 from mtg_prices.db import Database
 
 

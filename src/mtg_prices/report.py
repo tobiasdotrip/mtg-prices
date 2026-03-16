@@ -15,11 +15,21 @@ from mtg_prices.models import CardReport
 
 logger = logging.getLogger(__name__)
 
-BASIC_LANDS = frozenset({
-    "Plains", "Island", "Swamp", "Mountain", "Forest",
-    "Snow-Covered Plains", "Snow-Covered Island", "Snow-Covered Swamp",
-    "Snow-Covered Mountain", "Snow-Covered Forest", "Wastes",
-})
+BASIC_LANDS = frozenset(
+    {
+        "Plains",
+        "Island",
+        "Swamp",
+        "Mountain",
+        "Forest",
+        "Snow-Covered Plains",
+        "Snow-Covered Island",
+        "Snow-Covered Swamp",
+        "Snow-Covered Mountain",
+        "Snow-Covered Forest",
+        "Wastes",
+    }
+)
 
 CURRENCY_SYMBOLS = {"usd": "$", "eur": "€"}
 
@@ -46,7 +56,8 @@ def build_reports(
         if latest.fetched_at != today:
             logger.info(
                 "Latest price for %r is from %s, not today",
-                card.name, latest.fetched_at.isoformat(),
+                card.name,
+                latest.fetched_at.isoformat(),
             )
         current_price = getattr(latest, price_field)
         if current_price is None:
@@ -69,14 +80,16 @@ def build_reports(
             for d in days:
                 trends[d] = None
 
-        reports.append(CardReport(
-            name=card.name,
-            quantity=card.quantity,
-            price_usd=latest.price_usd,
-            price_eur=latest.price_eur,
-            set_code=latest.set_code,
-            trends=trends,
-        ))
+        reports.append(
+            CardReport(
+                name=card.name,
+                quantity=card.quantity,
+                price_usd=latest.price_usd,
+                price_eur=latest.price_eur,
+                set_code=latest.set_code,
+                trends=trends,
+            )
+        )
 
     price_attr = f"price_{currency}"
     reports.sort(key=lambda r: getattr(r, price_attr) or 0, reverse=True)
@@ -144,7 +157,9 @@ def export_csv(reports: list[CardReport], days: list[int]) -> str:
     fieldnames = ["qty", "name", "price_usd", "price_eur", "set_code"]
     for d in days:
         fieldnames.append(f"trend_{d}d")
-    writer = csv.DictWriter(output, fieldnames=fieldnames, quoting=csv.QUOTE_NONNUMERIC)
+    writer = csv.DictWriter(
+        output, fieldnames=fieldnames, quoting=csv.QUOTE_NONNUMERIC
+    )
     writer.writeheader()
     for r in reports:
         row: dict[str, object] = {

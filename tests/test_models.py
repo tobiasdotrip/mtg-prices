@@ -1,5 +1,6 @@
 from datetime import date
-from mtg_prices.models import Card, PriceEntry, CardReport
+
+from mtg_prices.models import Card, CardReport, PriceEntry
 
 
 def test_card_creation():

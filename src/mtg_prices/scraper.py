@@ -67,20 +67,25 @@ class ScryfallClient:
             time.sleep(_REQUEST_DELAY - elapsed)
         self._last_request = time.monotonic()
 
-    def _get(self, url: str, params: dict[str, str] | None = None) -> httpx.Response:
+    def _get(
+        self, url: str, params: dict[str, str] | None = None
+    ) -> httpx.Response:
         self._rate_limit()
         for attempt in range(3):
             resp = self._client.get(url, params=params)
             if resp.status_code == 429 or resp.status_code >= 500:
-                wait = 2 ** attempt
-                logger.warning("Scryfall %d, retrying in %ds...", resp.status_code, wait)
+                wait = 2**attempt
+                logger.warning(
+                    "Scryfall %d, retrying in %ds...", resp.status_code, wait
+                )
                 time.sleep(wait)
                 continue
             return resp
         return resp  # return last response even if failed
 
     def load_bulk_data(self, cache_dir: Path, max_age_hours: int = 24) -> None:
-        """Download Scryfall 'Default Cards' bulk file, cache it, and build a name index."""
+        """Download Scryfall 'Default Cards' bulk file,
+        cache it, and build a name index."""
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_file = cache_dir / "default-cards.json"
 
@@ -95,21 +100,25 @@ class ScryfallClient:
             logger.info("Fetching bulk data download URL...")
             meta_resp = self._get(f"{_BASE_URL}/bulk-data/default-cards")
             if meta_resp.status_code != 200:
-                logger.warning("Could not fetch bulk data metadata, falling back to API")
+                logger.warning(
+                    "Could not fetch bulk data metadata, falling back to API"
+                )
                 return
             download_uri = meta_resp.json()["download_uri"]
 
             logger.info("Downloading bulk data...")
-            with self._client.stream("GET", download_uri) as stream:
-                with open(cache_file, "wb") as f:
-                    for chunk in stream.iter_bytes(chunk_size=1024 * 64):
-                        f.write(chunk)
+            with (
+                self._client.stream("GET", download_uri) as stream,
+                open(cache_file, "wb") as f,
+            ):
+                for chunk in stream.iter_bytes(chunk_size=1024 * 64):
+                    f.write(chunk)
             logger.info("Bulk data saved to %s", cache_file)
 
         logger.info("Indexing bulk data...")
 
         index: dict[str, list[dict[str, Any]]] = {}
-        with open(cache_file, "r", encoding="utf-8") as f:
+        with open(cache_file, encoding="utf-8") as f:
             cards = json.load(f)
 
         for card_data in cards:
@@ -140,7 +149,12 @@ class ScryfallClient:
         # Exact search — returns all prints
         resp = self._get(
             f"{_BASE_URL}/cards/search",
-            params={"q": f'!"{normalized}"', "unique": "prints", "order": "released", "dir": "desc"},
+            params={
+                "q": f'!"{normalized}"',
+                "unique": "prints",
+                "order": "released",
+                "dir": "desc",
+            },
         )
         if resp.status_code == 200:
             data = resp.json()

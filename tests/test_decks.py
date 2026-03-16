@@ -1,6 +1,6 @@
 from datetime import date
 
-from mtg_prices.models import Card, Deck, PriceEntry
+from mtg_prices.models import Card, PriceEntry
 from mtg_prices.report import build_reports
 
 
@@ -58,10 +58,16 @@ def test_get_deck_by_name_not_found(db):
 def test_shared_prices_across_decks(db):
     """A card in multiple decks shares the same price data."""
     card_id = db.upsert_card(Card(name="Sol Ring", quantity=1))
-    db.upsert_price(PriceEntry(
-        card_id=card_id, price_usd=1.0, price_eur=0.8,
-        set_code="CMR", set_name="Commander", fetched_at=date(2026, 3, 15),
-    ))
+    db.upsert_price(
+        PriceEntry(
+            card_id=card_id,
+            price_usd=1.0,
+            price_eur=0.8,
+            set_code="CMR",
+            set_name="Commander",
+            fetched_at=date(2026, 3, 15),
+        )
+    )
     deck_a = db.upsert_deck("Deck A")
     deck_b = db.upsert_deck("Deck B")
     db.add_card_to_deck(deck_a, card_id, 1)
@@ -78,17 +84,31 @@ def test_build_reports_with_card_list(db):
     """build_reports accepts a card_list to filter by deck."""
     for name in ["Lightning Bolt", "Counterspell", "Sol Ring"]:
         card_id = db.upsert_card(Card(name=name, quantity=1))
-        db.upsert_price(PriceEntry(
-            card_id=card_id, price_usd=2.0, price_eur=1.5,
-            set_code="SET", set_name="Set", fetched_at=date(2026, 3, 15),
-        ))
+        db.upsert_price(
+            PriceEntry(
+                card_id=card_id,
+                price_usd=2.0,
+                price_eur=1.5,
+                set_code="SET",
+                set_name="Set",
+                fetched_at=date(2026, 3, 15),
+            )
+        )
 
     deck_id = db.upsert_deck("Test Deck")
-    bolt_id = db.conn.execute("SELECT id FROM cards WHERE name = 'Lightning Bolt'").fetchone()[0]
+    bolt_id = db.conn.execute(
+        "SELECT id FROM cards WHERE name = 'Lightning Bolt'"
+    ).fetchone()[0]
     db.add_card_to_deck(deck_id, bolt_id, 4)
 
     deck_cards = db.get_deck_cards(deck_id)
-    reports = build_reports(db, days=[7], currency="usd", card_list=deck_cards, today=date(2026, 3, 15))
+    reports = build_reports(
+        db,
+        days=[7],
+        currency="usd",
+        card_list=deck_cards,
+        today=date(2026, 3, 15),
+    )
     assert len(reports) == 1
     assert reports[0].name == "Lightning Bolt"
     assert reports[0].quantity == 4

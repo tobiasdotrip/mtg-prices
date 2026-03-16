@@ -72,7 +72,9 @@ class Database:
     def upsert_price(self, entry: PriceEntry) -> None:
         self.conn.execute(
             """
-            INSERT INTO prices (card_id, price_usd, price_eur, set_code, set_name, fetched_at)
+            INSERT INTO prices
+                (card_id, price_usd, price_eur,
+                 set_code, set_name, fetched_at)
             VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(card_id, fetched_at) DO UPDATE SET
                 price_usd = excluded.price_usd,
@@ -156,10 +158,14 @@ class Database:
             (name,),
         )
         self.conn.commit()
-        row = self.conn.execute("SELECT id FROM decks WHERE name = ?", (name,)).fetchone()
+        row = self.conn.execute(
+            "SELECT id FROM decks WHERE name = ?", (name,)
+        ).fetchone()
         return row[0]
 
-    def add_card_to_deck(self, deck_id: int, card_id: int, quantity: int) -> None:
+    def add_card_to_deck(
+        self, deck_id: int, card_id: int, quantity: int
+    ) -> None:
         self.conn.execute(
             """
             INSERT INTO deck_cards (deck_id, card_id, quantity)
@@ -171,7 +177,9 @@ class Database:
         self.conn.commit()
 
     def clear_deck(self, deck_id: int) -> None:
-        self.conn.execute("DELETE FROM deck_cards WHERE deck_id = ?", (deck_id,))
+        self.conn.execute(
+            "DELETE FROM deck_cards WHERE deck_id = ?", (deck_id,)
+        )
         self.conn.commit()
 
     def get_deck_cards(self, deck_id: int) -> list[Card]:
@@ -191,11 +199,15 @@ class Database:
         ]
 
     def get_all_decks(self) -> list[Deck]:
-        rows = self.conn.execute("SELECT id, name FROM decks ORDER BY name").fetchall()
+        rows = self.conn.execute(
+            "SELECT id, name FROM decks ORDER BY name"
+        ).fetchall()
         return [Deck(id=r[0], name=r[1]) for r in rows]
 
     def get_deck_by_name(self, name: str) -> Deck | None:
-        row = self.conn.execute("SELECT id, name FROM decks WHERE name = ?", (name,)).fetchone()
+        row = self.conn.execute(
+            "SELECT id, name FROM decks WHERE name = ?", (name,)
+        ).fetchone()
         if row is None:
             return None
         return Deck(id=row[0], name=row[1])

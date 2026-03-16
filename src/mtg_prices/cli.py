@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import logging
 import logging.handlers
 import os
@@ -15,17 +14,19 @@ from mtg_prices import __version__
 from mtg_prices.db import Database
 from mtg_prices.models import PriceEntry
 from mtg_prices.parser import parse_decklist
-from mtg_prices.report import build_reports, export_csv, export_json, print_table
+from mtg_prices.report import (
+    build_reports,
+    export_csv,
+    export_json,
+    print_table,
+)
 from mtg_prices.scraper import ScryfallClient
 
 
 def _default_data_dir() -> Path:
     """Data dir: $XDG_DATA_HOME/mtg-prices or ~/.local/share/mtg-prices."""
     xdg = os.environ.get("XDG_DATA_HOME")
-    if xdg:
-        base = Path(xdg)
-    else:
-        base = Path.home() / ".local" / "share"
+    base = Path(xdg) if xdg else Path.home() / ".local" / "share"
     return base / "mtg-prices"
 
 
@@ -57,7 +58,9 @@ def _setup_logging() -> None:
     file_handler.setLevel(logging.INFO)
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.WARNING)
-    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    fmt = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    )
     file_handler.setFormatter(fmt)
     console_handler.setFormatter(fmt)
     root = logging.getLogger("mtg_prices")
@@ -122,7 +125,9 @@ def fetch(decklist: Path, deck: str | None) -> None:
             )
             db.upsert_price(entry)
             fetched += 1
-            console.print(f"  [green]OK[/green] {card.name} -- ${result.get('price_usd', '?')}")
+            console.print(
+                f"  [green]OK[/green] {card.name} -- ${result.get('price_usd', '?')}"
+            )
     finally:
         client.close()
         db.close()
@@ -131,7 +136,9 @@ def fetch(decklist: Path, deck: str | None) -> None:
 
 
 @main.command()
-@click.option("--deck", default=None, help="Update prices for a specific deck only")
+@click.option(
+    "--deck", default=None, help="Update prices for a specific deck only"
+)
 def update(deck: str | None) -> None:
     """Re-fetch prices for all tracked cards (or a specific deck)."""
     db = Database(_get_db_path())
@@ -149,7 +156,9 @@ def update(deck: str | None) -> None:
             cards = db.get_all_cards()
 
         if not cards:
-            console.print("[yellow]No cards tracked yet. Run 'fetch' first.[/yellow]")
+            console.print(
+                "[yellow]No cards tracked yet. Run 'fetch' first.[/yellow]"
+            )
             return
 
         client = ScryfallClient()
@@ -183,8 +192,14 @@ def update(deck: str | None) -> None:
                 fetched += 1
 
                 new_usd = result.get("price_usd")
-                old_usd = old_price_entry.price_usd if old_price_entry else None
-                if new_usd is not None and old_usd is not None and old_usd != new_usd:
+                old_usd = (
+                    old_price_entry.price_usd if old_price_entry else None
+                )
+                if (
+                    new_usd is not None
+                    and old_usd is not None
+                    and old_usd != new_usd
+                ):
                     diff = new_usd - old_usd
                     sign = "+" if diff > 0 else ""
                     color = "green" if diff > 0 else "red"
@@ -194,21 +209,35 @@ def update(deck: str | None) -> None:
                         f"[{color}]({sign}{diff:.2f})[/{color}]"
                     )
                 else:
-                    console.print(f"  [green]OK[/green] {card.name} -- ${new_usd or '?'}")
+                    console.print(
+                        f"  [green]OK[/green] {card.name} -- ${new_usd or '?'}"
+                    )
         finally:
             client.close()
 
-        console.print(f"\n[bold]Updated {fetched} cards, {errors} errors.[/bold]")
+        console.print(
+            f"\n[bold]Updated {fetched} cards, {errors} errors.[/bold]"
+        )
     finally:
         db.close()
 
 
 @main.command()
-@click.option("--format", "fmt", type=click.Choice(["csv", "json"]), default=None)
-@click.option("--output", "output_path", type=click.Path(path_type=Path), default=None)
+@click.option(
+    "--format", "fmt", type=click.Choice(["csv", "json"]), default=None
+)
+@click.option(
+    "--output", "output_path", type=click.Path(path_type=Path), default=None
+)
 @click.option("--currency", type=click.Choice(["usd", "eur"]), default="usd")
-@click.option("--days", default="1,7,30", help="Trend windows, comma-separated (e.g. 1,7,30,90)")
-@click.option("--skip-basics", is_flag=True, default=False, help="Exclude basic lands")
+@click.option(
+    "--days",
+    default="1,7,30",
+    help="Trend windows, comma-separated (e.g. 1,7,30,90)",
+)
+@click.option(
+    "--skip-basics", is_flag=True, default=False, help="Exclude basic lands"
+)
 @click.option("--deck", default=None, help="Report for a specific deck only")
 def report(
     fmt: str | None,
@@ -234,11 +263,16 @@ def report(
             card_list = db.get_deck_cards(deck_obj.id)
 
         reports = build_reports(
-            db, days=day_list, currency=currency,
-            skip_basics=skip_basics, card_list=card_list,
+            db,
+            days=day_list,
+            currency=currency,
+            skip_basics=skip_basics,
+            card_list=card_list,
         )
         if not reports:
-            console.print("[yellow]No price data available. Run 'fetch' first.[/yellow]")
+            console.print(
+                "[yellow]No price data available. Run 'fetch' first.[/yellow]"
+            )
             return
 
         title = f"Deck: {deck}" if deck else None
@@ -282,7 +316,9 @@ def list_cards(deck: str | None) -> None:
             label = "All cards"
 
         if not cards:
-            console.print("[yellow]No cards tracked yet. Run 'fetch' first.[/yellow]")
+            console.print(
+                "[yellow]No cards tracked yet. Run 'fetch' first.[/yellow]"
+            )
             return
         console.print(f"[bold]{label}[/bold]\n")
         for card in cards:
@@ -301,7 +337,10 @@ def decks() -> None:
     try:
         all_decks = db.get_all_decks()
         if not all_decks:
-            console.print("[yellow]No decks yet. Use 'fetch --deck <name>' to create one.[/yellow]")
+            console.print(
+                "[yellow]No decks yet. Use "
+                "'fetch --deck <name>' to create one.[/yellow]"
+            )
             return
         for d in all_decks:
             card_count = len(db.get_deck_cards(d.id))

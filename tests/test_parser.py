@@ -1,6 +1,3 @@
-import textwrap
-from pathlib import Path
-
 from mtg_prices.parser import parse_decklist
 
 
