@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 import unicodedata
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -11,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://api.scryfall.com"
 _HEADERS = {
-    "User-Agent": "mtg-prices/0.1.0",
+    "User-Agent": "mtg-prices/0.3.0",
     "Accept": "application/json",
 }
 _REQUEST_DELAY = 0.1  # 100ms between requests
@@ -57,6 +59,7 @@ class ScryfallClient:
     def __init__(self) -> None:
         self._client = httpx.Client(headers=_HEADERS, timeout=30.0)
         self._last_request: float = 0
+        self._bulk_index: dict[str, list[dict[str, Any]]] | None = None
 
     def _rate_limit(self) -> None:
         elapsed = time.monotonic() - self._last_request
@@ -76,8 +79,64 @@ class ScryfallClient:
             return resp
         return resp  # return last response even if failed
 
+    def load_bulk_data(self, cache_dir: Path, max_age_hours: int = 24) -> None:
+        """Download Scryfall 'Default Cards' bulk file, cache it, and build a name index."""
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = cache_dir / "default-cards.json"
+
+        need_download = True
+        if cache_file.exists():
+            age_hours = (time.time() - cache_file.stat().st_mtime) / 3600
+            if age_hours < max_age_hours:
+                need_download = False
+                logger.info("Using cached bulk data (%.1fh old)", age_hours)
+
+        if need_download:
+            logger.info("Fetching bulk data download URL...")
+            meta_resp = self._get(f"{_BASE_URL}/bulk-data/default-cards")
+            if meta_resp.status_code != 200:
+                logger.warning("Could not fetch bulk data metadata, falling back to API")
+                return
+            download_uri = meta_resp.json()["download_uri"]
+
+            logger.info("Downloading bulk data...")
+            with self._client.stream("GET", download_uri) as stream:
+                with open(cache_file, "wb") as f:
+                    for chunk in stream.iter_bytes(chunk_size=1024 * 64):
+                        f.write(chunk)
+            logger.info("Bulk data saved to %s", cache_file)
+
+        logger.info("Indexing bulk data...")
+
+        index: dict[str, list[dict[str, Any]]] = {}
+        with open(cache_file, "r", encoding="utf-8") as f:
+            cards = json.load(f)
+
+        for card_data in cards:
+            if card_data.get("lang") != "en":
+                continue
+            name = normalize_name(card_data.get("name", ""))
+            if name:
+                index.setdefault(name.lower(), []).append(card_data)
+
+        # Sort each name's prints by release date descending (most recent first)
+        for prints in index.values():
+            prints.sort(key=lambda c: c.get("released_at", ""), reverse=True)
+
+        self._bulk_index = index
+        logger.info("Indexed %d unique card names from bulk data", len(index))
+
     def search_card(self, name: str) -> dict[str, Any] | None:
         normalized = normalize_name(name)
+
+        # Try bulk index first
+        if self._bulk_index is not None:
+            key = normalized.lower()
+            prints = self._bulk_index.get(key)
+            if prints:
+                return select_best_price(prints)
+            logger.info("Card %r not in bulk index, trying API", name)
+
         # Exact search — returns all prints
         resp = self._get(
             f"{_BASE_URL}/cards/search",

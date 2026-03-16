@@ -86,6 +86,8 @@ def fetch(decklist: Path, deck: str | None) -> None:
     db = Database(_get_db_path())
     db.init()
     client = ScryfallClient()
+    console.print("[dim]Loading Scryfall bulk data...[/dim]")
+    client.load_bulk_data(_default_data_dir())
 
     deck_id = None
     if deck:
@@ -129,10 +131,83 @@ def fetch(decklist: Path, deck: str | None) -> None:
 
 
 @main.command()
+@click.option("--deck", default=None, help="Update prices for a specific deck only")
+def update(deck: str | None) -> None:
+    """Re-fetch prices for all tracked cards (or a specific deck)."""
+    db = Database(_get_db_path())
+    db.init()
+
+    try:
+        if deck:
+            deck_obj = db.get_deck_by_name(deck)
+            if deck_obj is None:
+                console.print(f"[red]Deck '{deck}' not found.[/red]")
+                return
+            cards = db.get_deck_cards(deck_obj.id)
+            console.print(f"[bold]Deck:[/bold] {deck}\n")
+        else:
+            cards = db.get_all_cards()
+
+        if not cards:
+            console.print("[yellow]No cards tracked yet. Run 'fetch' first.[/yellow]")
+            return
+
+        client = ScryfallClient()
+        console.print("[dim]Loading Scryfall bulk data...[/dim]")
+        client.load_bulk_data(_default_data_dir())
+        today = date.today()
+        fetched = 0
+        errors = 0
+
+        try:
+            for card in cards:
+                result = client.search_card(card.name)
+                if result is None:
+                    errors += 1
+                    continue
+
+                card.oracle_id = result.get("oracle_id")
+                db.upsert_card(card)
+
+                old_price_entry = db.get_latest_price(card.id)
+
+                entry = PriceEntry(
+                    card_id=card.id,
+                    price_usd=result.get("price_usd"),
+                    price_eur=result.get("price_eur"),
+                    set_code=result["set_code"],
+                    set_name=result["set_name"],
+                    fetched_at=today,
+                )
+                db.upsert_price(entry)
+                fetched += 1
+
+                new_usd = result.get("price_usd")
+                old_usd = old_price_entry.price_usd if old_price_entry else None
+                if new_usd is not None and old_usd is not None and old_usd != new_usd:
+                    diff = new_usd - old_usd
+                    sign = "+" if diff > 0 else ""
+                    color = "green" if diff > 0 else "red"
+                    console.print(
+                        f"  [green]OK[/green] {card.name} -- "
+                        f"${old_usd:.2f} → ${new_usd:.2f} "
+                        f"[{color}]({sign}{diff:.2f})[/{color}]"
+                    )
+                else:
+                    console.print(f"  [green]OK[/green] {card.name} -- ${new_usd or '?'}")
+        finally:
+            client.close()
+
+        console.print(f"\n[bold]Updated {fetched} cards, {errors} errors.[/bold]")
+    finally:
+        db.close()
+
+
+@main.command()
 @click.option("--format", "fmt", type=click.Choice(["csv", "json"]), default=None)
 @click.option("--output", "output_path", type=click.Path(path_type=Path), default=None)
 @click.option("--currency", type=click.Choice(["usd", "eur"]), default="usd")
-@click.option("--days", default="7,30", help="Trend windows, comma-separated (e.g. 7,30,90)")
+@click.option("--days", default="1,7,30", help="Trend windows, comma-separated (e.g. 1,7,30,90)")
 @click.option("--skip-basics", is_flag=True, default=False, help="Exclude basic lands")
 @click.option("--deck", default=None, help="Report for a specific deck only")
 def report(
