@@ -10,22 +10,23 @@ CLI tool to track Magic: The Gathering card prices over time using the [Scryfall
 Feed it a decklist, run it daily, and get price trends for your collection.
 
 ```
-┌─────┬───────────────────────────┬─────────┬─────┬────────┬────────┐
-│ Qte │ Carte                     │    Prix │ Ext │     7j │    30j │
-├─────┼───────────────────────────┼─────────┼─────┼────────┼────────┤
-│   1 │ Sheoldred, the Apocalypse │  $72.35 │ DMU │ +3.2%  │ -1.8%  │
-│   1 │ Vampiric Tutor            │  $63.12 │ DMR │ +0.5%  │ +2.1%  │
-│   1 │ Demonic Tutor             │  $52.58 │ CMM │ -1.0%  │ -4.3%  │
-│  ...│                           │         │     │        │        │
-├─────┼───────────────────────────┼─────────┼─────┼────────┼────────┤
-│  78 │ TOTAL                     │ $752.26 │     │        │        │
-└─────┴───────────────────────────┴─────────┴─────┴────────┴────────┘
+┌─────┬───────────────────────────┬─────────┬─────┬────────┬────────┬────────┐
+│ Qte │ Carte                     │    Prix │ Ext │     1j │     7j │    30j │
+├─────┼───────────────────────────┼─────────┼─────┼────────┼────────┼────────┤
+│   1 │ Sheoldred, the Apocalypse │  $72.35 │ DMU │ +0.4%  │ +3.2%  │ -1.8%  │
+│   1 │ Vampiric Tutor            │  $63.12 │ DMR │ -0.1%  │ +0.5%  │ +2.1%  │
+│   1 │ Demonic Tutor             │  $52.58 │ CMM │ +0.9%  │ -1.0%  │ -4.3%  │
+│  ...│                           │         │     │        │        │        │
+├─────┼───────────────────────────┼─────────┼─────┼────────┼────────┼────────┤
+│  78 │ TOTAL                     │ $752.26 │     │        │        │        │
+└─────┴───────────────────────────┴─────────┴─────┴────────┴────────┴────────┘
 ```
 
 ## Features
 
-- **Daily price tracking** via Scryfall (free, no API key)
-- **Price trends** over configurable windows (7d, 30d, or custom)
+- **Daily price tracking** via Scryfall bulk data (free, no API key)
+- **Price deltas** — see price changes on each update
+- **Price trends** over configurable windows (1d, 7d, 30d, or custom)
 - **Deck management** — track multiple decks independently, shared price data
 - **Export** to CSV or JSON
 - **Skip basics** — filter out basic lands from reports
@@ -65,6 +66,24 @@ python -m mtg_prices fetch cards.txt
 python -m mtg_prices fetch cards.txt --deck "Vito EDH"
 ```
 
+### Update prices
+
+```bash
+# Update all tracked cards
+python -m mtg_prices update
+
+# Update a specific deck only
+python -m mtg_prices update --deck "Vito EDH"
+```
+
+Price deltas are shown for each card:
+
+```
+  OK Necropotence -- $30.98 → $32.56 (+1.58)
+  OK Ink-Eyes, Servant of Oni -- $8.16 → $6.95 (-1.21)
+  OK Arcane Signet -- $0.37
+```
+
 ### View reports
 
 ```bash
@@ -75,7 +94,7 @@ python -m mtg_prices report
 python -m mtg_prices report --deck "Vito EDH"
 
 # EUR prices, custom trend windows
-python -m mtg_prices report --currency eur --days 7,30,90
+python -m mtg_prices report --currency eur --days 1,7,30,90
 
 # Skip basic lands
 python -m mtg_prices report --skip-basics
@@ -97,22 +116,22 @@ python -m mtg_prices list --deck "Vito EDH"
 
 ### Automate with cron
 
-Scryfall updates prices once daily. Schedule a fetch ~10 minutes after their refresh:
+Scryfall updates prices once daily. Schedule an update:
 
 ```bash
 # crontab -e
-30 9 * * * cd /path/to/mtg-prices && python -m mtg_prices fetch cards.txt --deck "Vito EDH"
+30 9 * * * cd /path/to/mtg-prices && python -m mtg_prices update
 ```
 
 ## How it works
 
 1. **Parses** the decklist file
-2. **Searches** Scryfall for each card (`unique=prints`, sorted by release date)
+2. **Downloads** Scryfall's bulk data (cached locally for 24h)
 3. **Selects** the cheapest non-foil price among the 5 most recent editions
 4. **Stores** prices in SQLite with daily granularity
 5. **Computes** trends by comparing today's price to historical data
 
-Card names are normalized (diacritics removed) before search. Fuzzy matching is used as a fallback for typos.
+Card names are normalized (diacritics removed) before lookup. API fallback with fuzzy matching is used for cards not found in bulk data.
 
 ## Project structure
 
