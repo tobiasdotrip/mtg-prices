@@ -497,18 +497,21 @@ def suggest(
             return
 
         console.print(
-            "\n[dim]Enter suggestion numbers to accept (comma-separated), "
-            "or press Enter to skip:[/dim]"
+            "\n[dim]Accept swaps? Enter numbers (e.g. 1,4,6), "
+            "'all', or Enter to skip:[/dim]"
         )
         choice = input("> ").strip()
         if not choice:
             return
 
-        try:
-            selected = {int(n.strip()) for n in choice.split(",")}
-        except ValueError:
-            console.print("[red]Invalid input.[/red]")
-            return
+        if choice.lower() == "all":
+            selected = set(range(1, len(numbered_suggestions) + 1))
+        else:
+            try:
+                selected = {int(n.strip()) for n in choice.split(",")}
+            except ValueError:
+                console.print("[red]Invalid input.[/red]")
+                return
 
         swapped = 0
         for num in sorted(selected):
