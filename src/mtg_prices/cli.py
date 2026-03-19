@@ -7,12 +7,15 @@ import sys
 from datetime import date
 from pathlib import Path
 
+import json
+
 import click
 from rich.console import Console
+from rich.table import Table
 
 from mtg_prices import __version__
 from mtg_prices.db import Database
-from mtg_prices.models import PriceEntry
+from mtg_prices.models import PriceEntry, Suggestion
 from mtg_prices.parser import parse_decklist
 from mtg_prices.report import (
     build_reports,
@@ -20,7 +23,7 @@ from mtg_prices.report import (
     export_json,
     print_table,
 )
-from mtg_prices.scraper import ScryfallClient
+from mtg_prices.scraper import ScryfallClient, normalize_name
 
 
 def _default_data_dir() -> Path:
@@ -79,7 +82,15 @@ def main() -> None:
 @main.command()
 @click.argument("decklist", type=click.Path(exists=True, path_type=Path))
 @click.option("--deck", default=None, help="Associate cards with a named deck")
-def fetch(decklist: Path, deck: str | None) -> None:
+@click.option(
+    "--format", "deck_format", default="commander",
+    type=click.Choice(
+        ["commander", "standard", "modern", "pioneer", "pauper", "legacy", "vintage"],
+        case_sensitive=False,
+    ),
+    help="Deck format for legality checks (default: commander)",
+)
+def fetch(decklist: Path, deck: str | None, deck_format: str) -> None:
     """Fetch prices from Scryfall for cards in DECKLIST file."""
     cards = parse_decklist(decklist)
     if not cards:
@@ -94,7 +105,7 @@ def fetch(decklist: Path, deck: str | None) -> None:
 
     deck_id = None
     if deck:
-        deck_id = db.upsert_deck(deck)
+        deck_id = db.upsert_deck(deck, format=deck_format)
         db.clear_deck(deck_id)
         console.print(f"[bold]Deck:[/bold] {deck}\n")
 
@@ -346,5 +357,124 @@ def decks() -> None:
             card_count = len(db.get_deck_cards(d.id))
             console.print(f"  {d.name} ({card_count} cards)")
         console.print(f"\n[bold]{len(all_decks)} decks.[/bold]")
+    finally:
+        db.close()
+
+
+@main.command()
+@click.argument("deck_name")
+@click.option("--above", default=10.0, help="Only suggest for cards above this price (USD)")
+@click.option("--top", default=None, type=int, help="Only suggest for top N most expensive cards")
+@click.option("--max-suggestions", default=5, help="Max suggestions per card")
+def suggest(deck_name: str, above: float, top: int | None, max_suggestions: int) -> None:
+    """Suggest budget alternatives for expensive cards in a deck."""
+    from mtg_prices.suggest import find_suggestions
+
+    db = Database(_get_db_path())
+    db.init()
+
+    try:
+        deck = db.get_deck_by_name(deck_name)
+        if deck is None:
+            console.print(f"[red]Deck '{deck_name}' not found.[/red]")
+            return
+
+        cards = db.get_deck_cards(deck.id)
+        if not cards:
+            console.print("[yellow]No cards in this deck.[/yellow]")
+            return
+
+        # Get latest prices and filter expensive cards
+        expensive = []
+        for card in cards:
+            latest = db.get_latest_price(card.id)
+            if latest is None or latest.price_usd is None:
+                continue
+            if latest.price_usd >= above:
+                expensive.append((card, latest))
+
+        expensive.sort(key=lambda x: x[1].price_usd, reverse=True)
+        if top is not None:
+            expensive = expensive[:top]
+
+        if not expensive:
+            console.print(f"[yellow]No cards above ${above:.2f} in '{deck_name}'.[/yellow]")
+            return
+
+        client = ScryfallClient()
+        console.print("[dim]Loading Scryfall bulk data...[/dim]")
+        client.load_bulk_data(_default_data_dir())
+
+        if not client._bulk_type_index:
+            console.print(
+                "[red]Could not load Scryfall bulk data. "
+                "Check your internet connection and try again.[/red]"
+            )
+            client.close()
+            return
+
+        table = Table(title=f"Budget Suggestions for \"{deck_name}\"")
+        table.add_column("Card", style="bold")
+        table.add_column("Price", justify="right")
+        table.add_column("Suggestion")
+        table.add_column("Price", justify="right")
+        table.add_column("Saving", justify="right")
+
+        total_saving = 0.0
+        try:
+            for card, price_entry in expensive:
+                key = normalize_name(card.name).lower()
+                bulk_prints = client._bulk_index.get(key, []) if client._bulk_index else []
+                if not bulk_prints:
+                    continue
+                original_card = bulk_prints[0]
+
+                super_type = client._extract_super_type(original_card.get("type_line", ""))
+                candidates = client.get_candidates(super_type, original_card.get("color_identity", []))
+
+                # Check cache
+                cached = db.get_suggest_cache(deck_id=deck.id, card_id=card.id, threshold=above)
+                if cached:
+                    suggestions_data = json.loads(cached)
+                    suggestions = [Suggestion(**s) for s in suggestions_data]
+                else:
+                    suggestions = find_suggestions(
+                        original_card=original_card,
+                        candidates=candidates,
+                        deck_format=deck.format,
+                        max_suggestions=max_suggestions,
+                    )
+                    cache_data = json.dumps([
+                        {
+                            "original_name": s.original_name,
+                            "original_price": s.original_price,
+                            "suggested_name": s.suggested_name,
+                            "suggested_price": s.suggested_price,
+                            "score": s.score,
+                            "saving": s.saving,
+                            "edhrec_url": s.edhrec_url,
+                        }
+                        for s in suggestions
+                    ])
+                    db.put_suggest_cache(deck_id=deck.id, card_id=card.id, threshold=above, result_json=cache_data)
+
+                if not suggestions:
+                    table.add_row(card.name, f"${price_entry.price_usd:.2f}", "[dim]No suggestions[/dim]", "", "")
+                    continue
+
+                for i, s in enumerate(suggestions):
+                    total_saving += s.saving
+                    table.add_row(
+                        card.name if i == 0 else "",
+                        f"${s.original_price:.2f}" if i == 0 else "",
+                        s.suggested_name,
+                        f"${s.suggested_price:.2f}",
+                        f"[green]-${s.saving:.2f}[/green]",
+                    )
+        finally:
+            client.close()
+
+        console.print(table)
+        console.print(f"\n[bold]Total potential saving: ${total_saving:.2f}[/bold]")
     finally:
         db.close()
