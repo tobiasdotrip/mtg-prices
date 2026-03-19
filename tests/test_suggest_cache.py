@@ -1,6 +1,5 @@
 import json
 from datetime import datetime, timedelta
-from mtg_prices.db import Database
 
 
 def test_put_suggest_cache(db):
