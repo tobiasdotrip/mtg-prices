@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.resources
 import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
@@ -40,6 +41,13 @@ CREATE TABLE IF NOT EXISTS deck_cards (
 );
 """
 
+_MIGRATIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS schema_version (
+    version INTEGER NOT NULL,
+    applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 
 class Database:
     def __init__(self, path: str | Path) -> None:
@@ -48,6 +56,31 @@ class Database:
 
     def init(self) -> None:
         self.conn.executescript(_SCHEMA)
+        self.conn.executescript(_MIGRATIONS_SCHEMA)
+        self._apply_migrations()
+
+    def _apply_migrations(self) -> None:
+        row = self.conn.execute(
+            "SELECT MAX(version) FROM schema_version"
+        ).fetchone()
+        current = row[0] if row[0] is not None else 0
+
+        migrations_dir = importlib.resources.files("mtg_prices") / "migrations"
+        migration_files = sorted(
+            f for f in migrations_dir.iterdir() if f.name.endswith(".sql")
+        )
+
+        for mf in migration_files:
+            version = int(mf.name.split("_")[0])
+            if version <= current:
+                continue
+            sql = mf.read_text(encoding="utf-8")
+            self.conn.executescript(sql)
+            self.conn.execute(
+                "INSERT INTO schema_version (version) VALUES (?)",
+                (version,),
+            )
+            self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
@@ -152,11 +185,18 @@ class Database:
             for r in rows
         ]
 
-    def upsert_deck(self, name: str) -> int:
-        self.conn.execute(
-            "INSERT INTO decks (name) VALUES (?) ON CONFLICT(name) DO NOTHING",
-            (name,),
-        )
+    def upsert_deck(self, name: str, format: str | None = None) -> int:
+        if format is not None:
+            self.conn.execute(
+                "INSERT INTO decks (name, format) VALUES (?, ?) "
+                "ON CONFLICT(name) DO UPDATE SET format = excluded.format",
+                (name, format),
+            )
+        else:
+            self.conn.execute(
+                "INSERT INTO decks (name) VALUES (?) ON CONFLICT(name) DO NOTHING",
+                (name,),
+            )
         self.conn.commit()
         row = self.conn.execute(
             "SELECT id FROM decks WHERE name = ?", (name,)
@@ -200,14 +240,14 @@ class Database:
 
     def get_all_decks(self) -> list[Deck]:
         rows = self.conn.execute(
-            "SELECT id, name FROM decks ORDER BY name"
+            "SELECT id, name, format FROM decks ORDER BY name"
         ).fetchall()
-        return [Deck(id=r[0], name=r[1]) for r in rows]
+        return [Deck(id=r[0], name=r[1], format=r[2]) for r in rows]
 
     def get_deck_by_name(self, name: str) -> Deck | None:
         row = self.conn.execute(
-            "SELECT id, name FROM decks WHERE name = ?", (name,)
+            "SELECT id, name, format FROM decks WHERE name = ?", (name,)
         ).fetchone()
         if row is None:
             return None
-        return Deck(id=row[0], name=row[1])
+        return Deck(id=row[0], name=row[1], format=row[2])

@@ -1,0 +1,2 @@
+ALTER TABLE decks ADD COLUMN format TEXT NOT NULL DEFAULT 'commander';
+ALTER TABLE decks ADD COLUMN user_id INTEGER REFERENCES users(id);

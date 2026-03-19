@@ -26,7 +26,9 @@ class PriceEntry:
 @dataclass
 class Deck:
     name: str
+    format: str = "commander"
     id: int | None = None
+    user_id: int | None = None
 
 
 @dataclass
