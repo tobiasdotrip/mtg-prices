@@ -39,3 +39,14 @@ class CardReport:
     price_eur: float | None
     set_code: str
     trends: dict[int, float | None] = field(default_factory=dict)
+
+
+@dataclass
+class Suggestion:
+    original_name: str
+    original_price: float
+    suggested_name: str
+    suggested_price: float
+    score: float
+    saving: float
+    edhrec_url: str | None = None
