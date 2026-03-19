@@ -141,7 +141,7 @@ class ScryfallClient:
             name = normalize_name(card_data.get("name", ""))
             if name:
                 index.setdefault(name.lower(), []).append(card_data)
-            en_cards.append(card_data)
+                en_cards.append(card_data)
 
         # Sort each name's prints by release date descending (most recent first)
         for prints in index.values():
