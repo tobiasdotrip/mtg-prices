@@ -60,9 +60,7 @@ class Database:
         self._apply_migrations()
 
     def _apply_migrations(self) -> None:
-        row = self.conn.execute(
-            "SELECT MAX(version) FROM schema_version"
-        ).fetchone()
+        row = self.conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
         current = row[0] if row[0] is not None else 0
 
         migrations_dir = importlib.resources.files("mtg_prices") / "migrations"
@@ -182,10 +180,7 @@ class Database:
         rows = self.conn.execute(
             "SELECT id, name, oracle_id, quantity FROM cards ORDER BY name"
         ).fetchall()
-        return [
-            Card(id=r[0], name=r[1], oracle_id=r[2], quantity=r[3])
-            for r in rows
-        ]
+        return [Card(id=r[0], name=r[1], oracle_id=r[2], quantity=r[3]) for r in rows]
 
     def upsert_deck(self, name: str, format: str | None = None) -> int:
         if format is not None:
@@ -205,9 +200,7 @@ class Database:
         ).fetchone()
         return row[0]
 
-    def add_card_to_deck(
-        self, deck_id: int, card_id: int, quantity: int
-    ) -> None:
+    def add_card_to_deck(self, deck_id: int, card_id: int, quantity: int) -> None:
         self.conn.execute(
             """
             INSERT INTO deck_cards (deck_id, card_id, quantity)
@@ -219,9 +212,7 @@ class Database:
         self.conn.commit()
 
     def clear_deck(self, deck_id: int) -> None:
-        self.conn.execute(
-            "DELETE FROM deck_cards WHERE deck_id = ?", (deck_id,)
-        )
+        self.conn.execute("DELETE FROM deck_cards WHERE deck_id = ?", (deck_id,))
         self.conn.commit()
 
     def get_deck_cards(self, deck_id: int) -> list[Card]:
@@ -235,10 +226,7 @@ class Database:
             """,
             (deck_id,),
         ).fetchall()
-        return [
-            Card(id=r[0], name=r[1], oracle_id=r[2], quantity=r[3])
-            for r in rows
-        ]
+        return [Card(id=r[0], name=r[1], oracle_id=r[2], quantity=r[3]) for r in rows]
 
     def get_all_decks(self) -> list[Deck]:
         rows = self.conn.execute(

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 import logging.handlers
 import os
 import sys
 from datetime import date
 from pathlib import Path
-
-import json
 
 import click
 from rich.console import Console
@@ -61,9 +60,7 @@ def _setup_logging() -> None:
     file_handler.setLevel(logging.INFO)
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.WARNING)
-    fmt = logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-    )
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     file_handler.setFormatter(fmt)
     console_handler.setFormatter(fmt)
     root = logging.getLogger("mtg_prices")
@@ -83,7 +80,9 @@ def main() -> None:
 @click.argument("decklist", type=click.Path(exists=True, path_type=Path))
 @click.option("--deck", default=None, help="Associate cards with a named deck")
 @click.option(
-    "--format", "deck_format", default="commander",
+    "--format",
+    "deck_format",
+    default="commander",
     type=click.Choice(
         ["commander", "standard", "modern", "pioneer", "pauper", "legacy", "vintage"],
         case_sensitive=False,
@@ -147,9 +146,7 @@ def fetch(decklist: Path, deck: str | None, deck_format: str) -> None:
 
 
 @main.command()
-@click.option(
-    "--deck", default=None, help="Update prices for a specific deck only"
-)
+@click.option("--deck", default=None, help="Update prices for a specific deck only")
 def update(deck: str | None) -> None:
     """Re-fetch prices for all tracked cards (or a specific deck)."""
     db = Database(_get_db_path())
@@ -167,9 +164,7 @@ def update(deck: str | None) -> None:
             cards = db.get_all_cards()
 
         if not cards:
-            console.print(
-                "[yellow]No cards tracked yet. Run 'fetch' first.[/yellow]"
-            )
+            console.print("[yellow]No cards tracked yet. Run 'fetch' first.[/yellow]")
             return
 
         client = ScryfallClient()
@@ -203,14 +198,8 @@ def update(deck: str | None) -> None:
                 fetched += 1
 
                 new_usd = result.get("price_usd")
-                old_usd = (
-                    old_price_entry.price_usd if old_price_entry else None
-                )
-                if (
-                    new_usd is not None
-                    and old_usd is not None
-                    and old_usd != new_usd
-                ):
+                old_usd = old_price_entry.price_usd if old_price_entry else None
+                if new_usd is not None and old_usd is not None and old_usd != new_usd:
                     diff = new_usd - old_usd
                     sign = "+" if diff > 0 else ""
                     color = "green" if diff > 0 else "red"
@@ -230,29 +219,21 @@ def update(deck: str | None) -> None:
         if fetched > 0:
             db.clear_suggest_cache()
 
-        console.print(
-            f"\n[bold]Updated {fetched} cards, {errors} errors.[/bold]"
-        )
+        console.print(f"\n[bold]Updated {fetched} cards, {errors} errors.[/bold]")
     finally:
         db.close()
 
 
 @main.command()
-@click.option(
-    "--format", "fmt", type=click.Choice(["csv", "json"]), default=None
-)
-@click.option(
-    "--output", "output_path", type=click.Path(path_type=Path), default=None
-)
+@click.option("--format", "fmt", type=click.Choice(["csv", "json"]), default=None)
+@click.option("--output", "output_path", type=click.Path(path_type=Path), default=None)
 @click.option("--currency", type=click.Choice(["usd", "eur"]), default="usd")
 @click.option(
     "--days",
     default="1,7,30",
     help="Trend windows, comma-separated (e.g. 1,7,30,90)",
 )
-@click.option(
-    "--skip-basics", is_flag=True, default=False, help="Exclude basic lands"
-)
+@click.option("--skip-basics", is_flag=True, default=False, help="Exclude basic lands")
 @click.option("--deck", default=None, help="Report for a specific deck only")
 def report(
     fmt: str | None,
@@ -331,9 +312,7 @@ def list_cards(deck: str | None) -> None:
             label = "All cards"
 
         if not cards:
-            console.print(
-                "[yellow]No cards tracked yet. Run 'fetch' first.[/yellow]"
-            )
+            console.print("[yellow]No cards tracked yet. Run 'fetch' first.[/yellow]")
             return
         console.print(f"[bold]{label}[/bold]\n")
         for card in cards:
@@ -367,10 +346,16 @@ def decks() -> None:
 
 @main.command()
 @click.argument("deck_name")
-@click.option("--above", default=10.0, help="Only suggest for cards above this price (USD)")
-@click.option("--top", default=None, type=int, help="Only suggest for top N most expensive cards")
+@click.option(
+    "--above", default=10.0, help="Only suggest for cards above this price (USD)"
+)
+@click.option(
+    "--top", default=None, type=int, help="Only suggest for top N most expensive cards"
+)
 @click.option("--max-suggestions", default=5, help="Max suggestions per card")
-def suggest(deck_name: str, above: float, top: int | None, max_suggestions: int) -> None:
+def suggest(
+    deck_name: str, above: float, top: int | None, max_suggestions: int
+) -> None:
     """Suggest budget alternatives for expensive cards in a deck."""
     from mtg_prices.suggest import find_suggestions
 
@@ -402,7 +387,9 @@ def suggest(deck_name: str, above: float, top: int | None, max_suggestions: int)
             expensive = expensive[:top]
 
         if not expensive:
-            console.print(f"[yellow]No cards above ${above:.2f} in '{deck_name}'.[/yellow]")
+            console.print(
+                f"[yellow]No cards above ${above:.2f} in '{deck_name}'.[/yellow]"
+            )
             return
 
         client = ScryfallClient()
@@ -417,7 +404,7 @@ def suggest(deck_name: str, above: float, top: int | None, max_suggestions: int)
             client.close()
             return
 
-        table = Table(title=f"Budget Suggestions for \"{deck_name}\"")
+        table = Table(title=f'Budget Suggestions for "{deck_name}"')
         table.add_column("Card", style="bold")
         table.add_column("Price", justify="right")
         table.add_column("Suggestion")
@@ -428,16 +415,24 @@ def suggest(deck_name: str, above: float, top: int | None, max_suggestions: int)
         try:
             for card, price_entry in expensive:
                 key = normalize_name(card.name).lower()
-                bulk_prints = client._bulk_index.get(key, []) if client._bulk_index else []
+                bulk_prints = (
+                    client._bulk_index.get(key, []) if client._bulk_index else []
+                )
                 if not bulk_prints:
                     continue
                 original_card = bulk_prints[0]
 
-                super_type = client._extract_super_type(original_card.get("type_line", ""))
-                candidates = client.get_candidates(super_type, original_card.get("color_identity", []))
+                super_type = client._extract_super_type(
+                    original_card.get("type_line", "")
+                )
+                candidates = client.get_candidates(
+                    super_type, original_card.get("color_identity", [])
+                )
 
                 # Check cache
-                cached = db.get_suggest_cache(deck_id=deck.id, card_id=card.id, threshold=above)
+                cached = db.get_suggest_cache(
+                    deck_id=deck.id, card_id=card.id, threshold=above
+                )
                 if cached:
                     suggestions_data = json.loads(cached)
                     suggestions = [Suggestion(**s) for s in suggestions_data]
@@ -448,22 +443,35 @@ def suggest(deck_name: str, above: float, top: int | None, max_suggestions: int)
                         deck_format=deck.format,
                         max_suggestions=max_suggestions,
                     )
-                    cache_data = json.dumps([
-                        {
-                            "original_name": s.original_name,
-                            "original_price": s.original_price,
-                            "suggested_name": s.suggested_name,
-                            "suggested_price": s.suggested_price,
-                            "score": s.score,
-                            "saving": s.saving,
-                            "edhrec_url": s.edhrec_url,
-                        }
-                        for s in suggestions
-                    ])
-                    db.put_suggest_cache(deck_id=deck.id, card_id=card.id, threshold=above, result_json=cache_data)
+                    cache_data = json.dumps(
+                        [
+                            {
+                                "original_name": s.original_name,
+                                "original_price": s.original_price,
+                                "suggested_name": s.suggested_name,
+                                "suggested_price": s.suggested_price,
+                                "score": s.score,
+                                "saving": s.saving,
+                                "edhrec_url": s.edhrec_url,
+                            }
+                            for s in suggestions
+                        ]
+                    )
+                    db.put_suggest_cache(
+                        deck_id=deck.id,
+                        card_id=card.id,
+                        threshold=above,
+                        result_json=cache_data,
+                    )
 
                 if not suggestions:
-                    table.add_row(card.name, f"${price_entry.price_usd:.2f}", "[dim]No suggestions[/dim]", "", "")
+                    table.add_row(
+                        card.name,
+                        f"${price_entry.price_usd:.2f}",
+                        "[dim]No suggestions[/dim]",
+                        "",
+                        "",
+                    )
                     continue
 
                 for i, s in enumerate(suggestions):

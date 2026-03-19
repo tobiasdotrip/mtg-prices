@@ -35,9 +35,7 @@ def test_build_reports(db):
             fetched_at=date(2026, 3, 8),
         )
     )
-    reports = build_reports(
-        db, days=[7, 30], currency="usd", today=date(2026, 3, 15)
-    )
+    reports = build_reports(db, days=[7, 30], currency="usd", today=date(2026, 3, 15))
     assert len(reports) == 1
     r = reports[0]
     assert r.name == "Lightning Bolt"
@@ -62,9 +60,7 @@ def test_build_reports_null_currency_included(db):
             fetched_at=date(2026, 3, 15),
         )
     )
-    reports = build_reports(
-        db, days=[7], currency="eur", today=date(2026, 3, 15)
-    )
+    reports = build_reports(db, days=[7], currency="eur", today=date(2026, 3, 15))
     assert len(reports) == 1
     assert reports[0].price_eur is None
     assert reports[0].trends[7] is None

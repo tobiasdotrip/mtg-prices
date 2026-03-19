@@ -157,9 +157,7 @@ def export_csv(reports: list[CardReport], days: list[int]) -> str:
     fieldnames = ["qty", "name", "price_usd", "price_eur", "set_code"]
     for d in days:
         fieldnames.append(f"trend_{d}d")
-    writer = csv.DictWriter(
-        output, fieldnames=fieldnames, quoting=csv.QUOTE_NONNUMERIC
-    )
+    writer = csv.DictWriter(output, fieldnames=fieldnames, quoting=csv.QUOTE_NONNUMERIC)
     writer.writeheader()
     for r in reports:
         row: dict[str, object] = {

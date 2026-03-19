@@ -80,9 +80,7 @@ class ScryfallClient:
             time.sleep(_REQUEST_DELAY - elapsed)
         self._last_request = time.monotonic()
 
-    def _get(
-        self, url: str, params: dict[str, str] | None = None
-    ) -> httpx.Response:
+    def _get(self, url: str, params: dict[str, str] | None = None) -> httpx.Response:
         self._rate_limit()
         for attempt in range(3):
             resp = self._client.get(url, params=params)

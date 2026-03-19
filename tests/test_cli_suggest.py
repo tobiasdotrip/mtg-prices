@@ -22,7 +22,9 @@ def test_suggest_deck_not_found(mock_db_path, mock_client, tmp_path):
 @patch("mtg_prices.cli._get_db_path")
 @patch("mtg_prices.cli._default_data_dir")
 @patch("mtg_prices.cli.ScryfallClient")
-def test_suggest_no_expensive_cards(mock_client_cls, mock_data_dir, mock_db_path, tmp_path):
+def test_suggest_no_expensive_cards(
+    mock_client_cls, mock_data_dir, mock_db_path, tmp_path
+):
     db_path = tmp_path / "test.db"
     mock_db_path.return_value = str(db_path)
     mock_data_dir.return_value = tmp_path
@@ -32,10 +34,16 @@ def test_suggest_no_expensive_cards(mock_client_cls, mock_data_dir, mock_db_path
     deck_id = db.upsert_deck("Test Deck")
     card_id = db.upsert_card(Card(name="Cheap Card"))
     db.add_card_to_deck(deck_id, card_id, 1)
-    db.upsert_price(PriceEntry(
-        card_id=card_id, price_usd=1.00, price_eur=0.80,
-        set_code="test", set_name="Test Set", fetched_at=date.today(),
-    ))
+    db.upsert_price(
+        PriceEntry(
+            card_id=card_id,
+            price_usd=1.00,
+            price_eur=0.80,
+            set_code="test",
+            set_name="Test Set",
+            fetched_at=date.today(),
+        )
+    )
     db.close()
 
     mock_client = MagicMock()

@@ -13,9 +13,7 @@ _LINE_RE = re.compile(r"^(\d+)\s+(.+)$")
 
 def parse_decklist(path: Path) -> list[Card]:
     cards: list[Card] = []
-    for lineno, raw in enumerate(
-        path.read_text(encoding="utf-8").splitlines(), 1
-    ):
+    for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue

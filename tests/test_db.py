@@ -25,9 +25,7 @@ def test_upsert_card_update_quantity(db):
     card2 = Card(name="Lightning Bolt", quantity=2, oracle_id="abc-123")
     id2 = db.upsert_card(card2)
     assert id1 == id2
-    row = db.conn.execute(
-        "SELECT quantity FROM cards WHERE id = ?", (id1,)
-    ).fetchone()
+    row = db.conn.execute("SELECT quantity FROM cards WHERE id = ?", (id1,)).fetchone()
     assert row[0] == 2
 
 

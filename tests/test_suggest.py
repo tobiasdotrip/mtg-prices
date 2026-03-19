@@ -64,6 +64,7 @@ MURDER = {
 # TestExtractOracleKeywords
 # ---------------------------------------------------------------------------
 
+
 class TestExtractOracleKeywords:
     def test_destroy(self):
         result = extract_oracle_keywords("Destroy target creature.")
@@ -89,6 +90,7 @@ class TestExtractOracleKeywords:
 # TestScoreCmc
 # ---------------------------------------------------------------------------
 
+
 class TestScoreCmc:
     def test_exact_match(self):
         assert score_cmc(3.0, 3.0) == 2
@@ -106,6 +108,7 @@ class TestScoreCmc:
 # ---------------------------------------------------------------------------
 # TestScoreEdhrecRank
 # ---------------------------------------------------------------------------
+
 
 class TestScoreEdhrecRank:
     def test_rank_1(self):
@@ -128,6 +131,7 @@ class TestScoreEdhrecRank:
 # TestScoreKeywords
 # ---------------------------------------------------------------------------
 
+
 class TestScoreKeywords:
     def test_shared(self):
         assert score_keywords(["flying"], ["flying"]) == 2
@@ -147,9 +151,12 @@ class TestScoreKeywords:
 # TestScoreOracleText
 # ---------------------------------------------------------------------------
 
+
 class TestScoreOracleText:
     def test_shared(self):
-        assert score_oracle_text("Destroy target creature.", "Destroy all creatures.") == 3
+        assert (
+            score_oracle_text("Destroy target creature.", "Destroy all creatures.") == 3
+        )
 
     def test_no_shared(self):
         assert score_oracle_text("Draw a card.", "Gain 3 life.") == 0
@@ -166,6 +173,7 @@ class TestScoreOracleText:
 # ---------------------------------------------------------------------------
 # TestScorePowerToughness
 # ---------------------------------------------------------------------------
+
 
 class TestScorePowerToughness:
     def test_exact(self):
@@ -188,6 +196,7 @@ class TestScorePowerToughness:
 # TestScoreCandidate
 # ---------------------------------------------------------------------------
 
+
 class TestScoreCandidate:
     def test_similar_high(self):
         score = score_candidate(SWORDS, PATH_TO_EXILE)
@@ -201,6 +210,7 @@ class TestScoreCandidate:
 # ---------------------------------------------------------------------------
 # TestFindSuggestions
 # ---------------------------------------------------------------------------
+
 
 class TestFindSuggestions:
     def test_returns_cheaper(self):
@@ -219,7 +229,11 @@ class TestFindSuggestions:
 
     def test_respects_max(self):
         candidates = [
-            {**MURDER, "name": f"Murder Variant {i}", "prices": {"usd": str(0.10 + i * 0.01)}}
+            {
+                **MURDER,
+                "name": f"Murder Variant {i}",
+                "prices": {"usd": str(0.10 + i * 0.01)},
+            }
             for i in range(10)
         ]
         results = find_suggestions(SWORDS, candidates, "commander", max_suggestions=3)

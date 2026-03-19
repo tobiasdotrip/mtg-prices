@@ -12,8 +12,7 @@ MOCK_CARDS = [
         "color_identity": ["W"],
         "cmc": 1.0,
         "oracle_text": (
-            "Exile target creature. Its controller gains life"
-            " equal to its power."
+            "Exile target creature. Its controller gains life equal to its power."
         ),
         "keywords": ["Exile"],
         "edhrec_rank": 5,
@@ -138,7 +137,5 @@ def test_extract_super_type_double_faced(client: ScryfallClient) -> None:
 
 
 def test_extract_super_type_legendary(client: ScryfallClient) -> None:
-    result = client._extract_super_type(
-        "Legendary Creature \u2014 Human Knight"
-    )
+    result = client._extract_super_type("Legendary Creature \u2014 Human Knight")
     assert result == "Creature"

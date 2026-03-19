@@ -4,13 +4,36 @@ import re
 
 from mtg_prices.models import Suggestion
 
-ORACLE_KEYWORDS = frozenset({
-    "destroy", "draw", "life", "exile", "counter", "sacrifice",
-    "search", "token", "damage", "discard", "mill", "scry",
-    "return", "tap", "untap", "flash", "haste", "trample",
-    "flying", "deathtouch", "lifelink", "vigilance", "menace",
-    "hexproof", "indestructible", "ward",
-})
+ORACLE_KEYWORDS = frozenset(
+    {
+        "destroy",
+        "draw",
+        "life",
+        "exile",
+        "counter",
+        "sacrifice",
+        "search",
+        "token",
+        "damage",
+        "discard",
+        "mill",
+        "scry",
+        "return",
+        "tap",
+        "untap",
+        "flash",
+        "haste",
+        "trample",
+        "flying",
+        "deathtouch",
+        "lifelink",
+        "vigilance",
+        "menace",
+        "hexproof",
+        "indestructible",
+        "ward",
+    }
+)
 
 _WORD_RE = re.compile(r"[a-z]+")
 
@@ -50,8 +73,10 @@ def score_oracle_text(original_text: str | None, candidate_text: str | None) -> 
 
 
 def score_power_toughness(
-    orig_power: str | None, orig_toughness: str | None,
-    cand_power: str | None, cand_toughness: str | None,
+    orig_power: str | None,
+    orig_toughness: str | None,
+    cand_power: str | None,
+    cand_toughness: str | None,
 ) -> int:
     try:
         op, ot = int(orig_power), int(orig_toughness)  # type: ignore[arg-type]
@@ -67,15 +92,19 @@ def score_candidate(original: dict, candidate: dict) -> float:
     score = 0.0
     score += score_cmc(original.get("cmc", 0), candidate.get("cmc", 0))
     score += score_oracle_text(
-        original.get("oracle_text"), candidate.get("oracle_text"),
+        original.get("oracle_text"),
+        candidate.get("oracle_text"),
     )
     score += score_keywords(
-        original.get("keywords", []), candidate.get("keywords", []),
+        original.get("keywords", []),
+        candidate.get("keywords", []),
     )
     score += score_edhrec_rank(candidate.get("edhrec_rank"))
     score += score_power_toughness(
-        original.get("power"), original.get("toughness"),
-        candidate.get("power"), candidate.get("toughness"),
+        original.get("power"),
+        original.get("toughness"),
+        candidate.get("power"),
+        candidate.get("toughness"),
     )
     return score
 
@@ -111,7 +140,7 @@ def find_suggestions(
 
     results: list[Suggestion] = []
     seen_names: set[str] = set()
-    for s, cand in scored[:max_suggestions * 2]:
+    for s, cand in scored[: max_suggestions * 2]:
         name = cand["name"]
         if name in seen_names:
             continue
@@ -121,17 +150,20 @@ def find_suggestions(
         edhrec_url = (
             f"https://edhrec.com/cards/"
             f"{name.lower().replace(' ', '-').replace(',', '')}"
-            if edhrec_rank is not None else None
+            if edhrec_rank is not None
+            else None
         )
-        results.append(Suggestion(
-            original_name=original_card["name"],
-            original_price=original_price,
-            suggested_name=name,
-            suggested_price=cand_price,
-            score=s,
-            saving=original_price - cand_price,
-            edhrec_url=edhrec_url,
-        ))
+        results.append(
+            Suggestion(
+                original_name=original_card["name"],
+                original_price=original_price,
+                suggested_name=name,
+                suggested_price=cand_price,
+                score=s,
+                saving=original_price - cand_price,
+                edhrec_url=edhrec_url,
+            )
+        )
         if len(results) >= max_suggestions:
             break
     return results
