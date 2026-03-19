@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://api.scryfall.com"
 _HEADERS = {
-    "User-Agent": "mtg-prices/0.3.0",
+    "User-Agent": "mtg-prices/0.4.0",
     "Accept": "application/json",
 }
 _REQUEST_DELAY = 0.1  # 100ms between requests

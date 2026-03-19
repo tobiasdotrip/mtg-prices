@@ -21,7 +21,7 @@ def sample_decklist(tmp_path):
 def test_version(runner):
     result = runner.invoke(main, ["--version"])
     assert result.exit_code == 0
-    assert "0.3.0" in result.output
+    assert "0.4.0" in result.output
 
 
 def test_fetch_creates_db(runner, sample_decklist, tmp_path):
