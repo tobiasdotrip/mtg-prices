@@ -226,6 +226,10 @@ def update(deck: str | None) -> None:
         finally:
             client.close()
 
+        # Invalidate suggest cache since prices changed
+        if fetched > 0:
+            db.clear_suggest_cache()
+
         console.print(
             f"\n[bold]Updated {fetched} cards, {errors} errors.[/bold]"
         )
