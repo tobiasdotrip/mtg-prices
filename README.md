@@ -27,11 +27,13 @@ Feed it a decklist, run it daily, and get price trends for your collection.
 - **Daily price tracking** via Scryfall bulk data (free, no API key)
 - **Price deltas** — see price changes on each update
 - **Price trends** over configurable windows (1d, 7d, 30d, or custom)
+- **Budget suggestions** — find cheaper alternatives for expensive cards, with role-based scoring
 - **Deck management** — track multiple decks independently, shared price data
+- **Deck formats** — commander, standard, modern, pioneer, pauper, legacy, vintage
 - **Export** to CSV or JSON
 - **Skip basics** — filter out basic lands from reports
 - **USD & EUR** pricing support
-- **SQLite storage** — single file, zero config
+- **SQLite storage** — single file, zero config, automatic schema migrations
 
 ## Installation
 
@@ -64,6 +66,9 @@ python -m mtg_prices fetch cards.txt
 
 # Associate with a named deck
 python -m mtg_prices fetch cards.txt --deck "Vito EDH"
+
+# Specify a format (default: commander)
+python -m mtg_prices fetch cards.txt --deck "Vito EDH" --format commander
 ```
 
 ### Update prices
@@ -104,6 +109,24 @@ python -m mtg_prices report --format csv --output prices.csv
 python -m mtg_prices report --format json
 ```
 
+### Budget suggestions
+
+```bash
+# Suggest cheaper alternatives for cards above $10
+python -m mtg_prices suggest "Vito EDH"
+
+# Custom threshold
+python -m mtg_prices suggest "Vito EDH" --above 20.00
+
+# Top 5 most expensive only, max 3 suggestions each
+python -m mtg_prices suggest "Vito EDH" --top 5 --max-suggestions 3
+
+# Include lands (excluded by default)
+python -m mtg_prices suggest "Vito EDH" --include-lands
+```
+
+Suggestions are scored by functional role, oracle text similarity, CMC, keywords, EDHREC popularity, and power/toughness. Accept swaps interactively by entering suggestion numbers, `all`, or Enter to skip.
+
 ### Manage decks
 
 ```bash
@@ -137,12 +160,14 @@ Card names are normalized (diacritics removed) before lookup. API fallback with 
 
 ```
 src/mtg_prices/
-  cli.py        # Click CLI (fetch, report, list, decks)
-  scraper.py    # Scryfall client, rate limiting, price selection
-  db.py         # SQLite layer (cards, prices, decks)
+  cli.py        # Click CLI (fetch, update, report, suggest, list, decks)
+  scraper.py    # Scryfall client, bulk data indexing, rate limiting
+  suggest.py    # Budget swap scoring engine (roles, oracle text, CMC, keywords)
+  db.py         # SQLite layer with automatic schema migrations
   report.py     # Rich table, CSV/JSON export
   parser.py     # Decklist file parser
-  models.py     # Dataclasses (Card, Deck, PriceEntry, CardReport)
+  models.py     # Dataclasses (Card, Deck, PriceEntry, Suggestion, CardReport)
+  migrations/   # Numbered SQL migration files
 ```
 
 ## Running tests
