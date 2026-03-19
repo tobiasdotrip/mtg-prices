@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from mtg_prices.suggest import (
+    classify_roles,
     extract_oracle_keywords,
     find_suggestions,
     score_candidate,
@@ -11,6 +12,7 @@ from mtg_prices.suggest import (
     score_keywords,
     score_oracle_text,
     score_power_toughness,
+    score_roles,
 )
 
 # ---------------------------------------------------------------------------
@@ -193,6 +195,90 @@ class TestScorePowerToughness:
 
 
 # ---------------------------------------------------------------------------
+# TestClassifyRoles
+# ---------------------------------------------------------------------------
+
+
+class TestClassifyRoles:
+    def test_tutor(self):
+        text = "Search your library for a card and put it into your hand."
+        assert "tutor" in classify_roles(text)
+
+    def test_removal(self):
+        text = "Destroy target creature."
+        assert "removal" in classify_roles(text)
+
+    def test_board_wipe(self):
+        text = "Destroy all creatures."
+        assert "board_wipe" in classify_roles(text)
+
+    def test_card_draw(self):
+        text = "Draw a card."
+        assert "card_draw" in classify_roles(text)
+
+    def test_ramp(self):
+        text = "{T}: Add {B}{B}."
+        assert "ramp" in classify_roles(text)
+
+    def test_lifedrain(self):
+        text = "Each opponent loses 2 life and you gain life equal to the life lost."
+        roles = classify_roles(text)
+        assert "lifedrain" in roles
+        assert "lifegain" in roles
+
+    def test_graveyard_hate(self):
+        text = "Exile target card from a graveyard."
+        assert "graveyard_hate" in classify_roles(text)
+
+    def test_multiple_roles(self):
+        text = "Search your library for a card. Draw a card."
+        roles = classify_roles(text)
+        assert "tutor" in roles
+        assert "card_draw" in roles
+
+    def test_empty(self):
+        assert classify_roles("") == set()
+
+    def test_none(self):
+        assert classify_roles(None) == set()
+
+    def test_no_match(self):
+        text = "This creature gets +1/+1."
+        assert classify_roles(text) == set()
+
+
+# ---------------------------------------------------------------------------
+# TestScoreRoles
+# ---------------------------------------------------------------------------
+
+
+class TestScoreRoles:
+    def test_shared_role(self):
+        tutor1 = "Search your library for a card."
+        tutor2 = "Search your library for a creature card."
+        assert score_roles(tutor1, tutor2) == 3
+
+    def test_no_shared_role(self):
+        tutor = "Search your library for a card."
+        removal = "Destroy target creature."
+        assert score_roles(tutor, removal) == 0
+
+    def test_two_shared_roles(self):
+        text = "Search your library for a card. Draw a card."
+        assert score_roles(text, text) == 6
+
+    def test_capped_at_6(self):
+        text = (
+            "Search your library for a card. Draw a card. "
+            "Destroy target creature. Each opponent loses 2 life."
+        )
+        assert score_roles(text, text) == 6
+
+    def test_none(self):
+        assert score_roles(None, None) == 0
+
+
+# ---------------------------------------------------------------------------
 # TestScoreCandidate
 # ---------------------------------------------------------------------------
 
@@ -202,9 +288,21 @@ class TestScoreCandidate:
         score = score_candidate(SWORDS, PATH_TO_EXILE)
         assert score > 5
 
-    def test_dissimilar_low(self):
+    def test_same_role_but_different_profile(self):
+        """SWORDS and MURDER share removal role but differ in CMC/color."""
         score = score_candidate(SWORDS, MURDER)
-        assert score < 3
+        assert score < score_candidate(SWORDS, PATH_TO_EXILE)
+
+    def test_no_shared_role_scores_lower(self):
+        """A card with no shared role should score lower than one with."""
+        graveyard_hate = {
+            **MURDER,
+            "oracle_text": "Exile target card from a graveyard.",
+            "edhrec_rank": 200,
+        }
+        no_role_score = score_candidate(SWORDS, graveyard_hate)
+        same_role_score = score_candidate(SWORDS, PATH_TO_EXILE)
+        assert no_role_score < same_role_score
 
 
 # ---------------------------------------------------------------------------

@@ -37,6 +37,56 @@ ORACLE_KEYWORDS = frozenset(
 
 _WORD_RE = re.compile(r"[a-z]+")
 
+ROLE_PATTERNS: dict[str, list[str]] = {
+    "tutor": ["search your library"],
+    "removal": [
+        "destroy target",
+        "exile target creature",
+        "exile target permanent",
+        "exile target nonland",
+    ],
+    "board_wipe": ["destroy all", "all creatures get -", "exile all"],
+    "card_draw": ["draw a card", "draw two cards", "draw cards equal"],
+    "ramp": ["add {", "search your library for a basic land"],
+    "recursion": [
+        "return target creature card from your graveyard",
+        "return from your graveyard",
+    ],
+    "graveyard_hate": [
+        "exile target card from a graveyard",
+        "exile all cards from",
+    ],
+    "lifegain": ["you gain life", "gain life equal"],
+    "lifedrain": ["each opponent loses", "loses life equal"],
+    "sacrifice": ["sacrifice a creature", "sacrifice a permanent"],
+    "token": ["create a", "create two", "create three"],
+    "counterspell": ["counter target spell"],
+    "discard": ["each opponent discards", "target player discards"],
+    "protection": ["hexproof", "indestructible"],
+}
+
+
+def classify_roles(oracle_text: str | None) -> set[str]:
+    """Classify a card's functional roles from its oracle text."""
+    if not oracle_text:
+        return set()
+    text = oracle_text.lower()
+    roles = set()
+    for role, patterns in ROLE_PATTERNS.items():
+        if any(p in text for p in patterns):
+            roles.add(role)
+    return roles
+
+
+def score_roles(
+    original_text: str | None, candidate_text: str | None
+) -> int:
+    """Score based on shared functional roles. 3 per shared role, cap 6."""
+    orig_roles = classify_roles(original_text)
+    cand_roles = classify_roles(candidate_text)
+    shared = orig_roles & cand_roles
+    return min(len(shared) * 3, 6)
+
 
 def extract_oracle_keywords(oracle_text: str | None) -> set[str]:
     if not oracle_text:
@@ -90,6 +140,10 @@ def score_power_toughness(
 
 def score_candidate(original: dict, candidate: dict) -> float:
     score = 0.0
+    score += score_roles(
+        original.get("oracle_text"),
+        candidate.get("oracle_text"),
+    )
     score += score_cmc(original.get("cmc", 0), candidate.get("cmc", 0))
     score += score_oracle_text(
         original.get("oracle_text"),
