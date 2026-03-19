@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib.resources
 import sqlite3
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from mtg_prices.models import Card, Deck, PriceEntry
@@ -253,3 +253,34 @@ class Database:
         if row is None:
             return None
         return Deck(id=row[0], name=row[1], format=row[2])
+
+    def put_suggest_cache(
+        self, deck_id: int, card_id: int, threshold: float, result_json: str
+    ) -> None:
+        self.conn.execute(
+            "INSERT INTO suggest_cache (deck_id, card_id, threshold, result_json) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(deck_id, card_id, threshold) DO UPDATE SET "
+            "result_json = excluded.result_json, created_at = CURRENT_TIMESTAMP",
+            (deck_id, card_id, threshold, result_json),
+        )
+        self.conn.commit()
+
+    def get_suggest_cache(
+        self, deck_id: int, card_id: int, threshold: float, max_age_hours: int = 24
+    ) -> str | None:
+        row = self.conn.execute(
+            "SELECT result_json, created_at FROM suggest_cache "
+            "WHERE deck_id = ? AND card_id = ? AND threshold = ?",
+            (deck_id, card_id, threshold),
+        ).fetchone()
+        if row is None:
+            return None
+        created_at = datetime.fromisoformat(row[1])
+        if (datetime.now() - created_at).total_seconds() > max_age_hours * 3600:
+            return None
+        return row[0]
+
+    def clear_suggest_cache(self) -> None:
+        self.conn.execute("DELETE FROM suggest_cache")
+        self.conn.commit()
