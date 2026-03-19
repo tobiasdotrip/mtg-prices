@@ -211,6 +211,13 @@ class Database:
         )
         self.conn.commit()
 
+    def remove_card_from_deck(self, deck_id: int, card_id: int) -> None:
+        self.conn.execute(
+            "DELETE FROM deck_cards WHERE deck_id = ? AND card_id = ?",
+            (deck_id, card_id),
+        )
+        self.conn.commit()
+
     def clear_deck(self, deck_id: int) -> None:
         self.conn.execute("DELETE FROM deck_cards WHERE deck_id = ?", (deck_id,))
         self.conn.commit()

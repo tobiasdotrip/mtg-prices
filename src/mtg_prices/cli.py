@@ -15,7 +15,7 @@ from rich.table import Table
 
 from mtg_prices import __version__
 from mtg_prices.db import Database
-from mtg_prices.models import PriceEntry, Suggestion
+from mtg_prices.models import Card, PriceEntry, Suggestion
 from mtg_prices.parser import parse_decklist
 from mtg_prices.report import (
     build_reports,
@@ -412,6 +412,7 @@ def suggest(
             return
 
         table = Table(title=f'Budget Suggestions for "{deck_name}"')
+        table.add_column("#", justify="right", style="dim")
         table.add_column("Card", style="bold")
         table.add_column("Price", justify="right")
         table.add_column("Suggestion")
@@ -419,6 +420,8 @@ def suggest(
         table.add_column("Saving", justify="right")
 
         total_saving = 0.0
+        numbered_suggestions: list[tuple[Card, Suggestion]] = []
+        suggestion_num = 0
         try:
             for card, price_entry in expensive:
                 key = normalize_name(card.name).lower()
@@ -463,6 +466,7 @@ def suggest(
 
                 if not suggestions:
                     table.add_row(
+                        "",
                         card.name,
                         f"${price_entry.price_usd:.2f}",
                         "[dim]No suggestions[/dim]",
@@ -472,8 +476,11 @@ def suggest(
                     continue
 
                 for i, s in enumerate(suggestions):
+                    suggestion_num += 1
                     total_saving += s.saving
+                    numbered_suggestions.append((card, s))
                     table.add_row(
+                        str(suggestion_num),
                         card.name if i == 0 else "",
                         f"${s.original_price:.2f}" if i == 0 else "",
                         s.suggested_name,
@@ -485,5 +492,44 @@ def suggest(
 
         console.print(table)
         console.print(f"\n[bold]Total potential saving: ${total_saving:.2f}[/bold]")
+
+        if not numbered_suggestions:
+            return
+
+        console.print(
+            "\n[dim]Enter suggestion numbers to accept (comma-separated), "
+            "or press Enter to skip:[/dim]"
+        )
+        choice = input("> ").strip()
+        if not choice:
+            return
+
+        try:
+            selected = {int(n.strip()) for n in choice.split(",")}
+        except ValueError:
+            console.print("[red]Invalid input.[/red]")
+            return
+
+        swapped = 0
+        for num in sorted(selected):
+            if num < 1 or num > len(numbered_suggestions):
+                console.print(f"[yellow]#{num} out of range, skipped.[/yellow]")
+                continue
+            original_card_obj, suggestion = numbered_suggestions[num - 1]
+            new_card = Card(name=suggestion.suggested_name)
+            new_card_id = db.upsert_card(new_card)
+            db.remove_card_from_deck(deck.id, original_card_obj.id)
+            db.add_card_to_deck(deck.id, new_card_id, original_card_obj.quantity)
+            swapped += 1
+            console.print(
+                f"  [green]✓[/green] {original_card_obj.name} → {suggestion.suggested_name}"
+            )
+
+        if swapped > 0:
+            db.clear_suggest_cache()
+            console.print(
+                f"\n[bold]{swapped} card(s) swapped. "
+                f"Run 'mtg-prices update --deck \"{deck_name}\"' to fetch prices.[/bold]"
+            )
     finally:
         db.close()
