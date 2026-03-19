@@ -26,3 +26,4 @@ testpaths = ["tests"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mtg_prices"]
+artifacts = ["src/mtg_prices/migrations/*.sql"]

@@ -67,7 +67,9 @@ class Database:
 
         migrations_dir = importlib.resources.files("mtg_prices") / "migrations"
         migration_files = sorted(
-            f for f in migrations_dir.iterdir() if f.name.endswith(".sql")
+            f
+            for f in migrations_dir.iterdir()
+            if f.name.endswith(".sql") and f.name.split("_")[0].isdigit()
         )
 
         for mf in migration_files:
