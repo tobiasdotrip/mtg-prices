@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import logging.handlers
@@ -104,7 +105,7 @@ def fetch(decklist: Path, deck: str | None, deck_format: str) -> None:
 
     deck_id = None
     if deck:
-        deck_id = db.upsert_deck(deck, format=deck_format)
+        deck_id = db.upsert_deck(deck, deck_format=deck_format)
         db.clear_deck(deck_id)
         console.print(f"[bold]Deck:[/bold] {deck}\n")
 
@@ -215,7 +216,6 @@ def update(deck: str | None) -> None:
         finally:
             client.close()
 
-        # Invalidate suggest cache since prices changed
         if fetched > 0:
             db.clear_suggest_cache()
 
@@ -438,7 +438,6 @@ def suggest(
                     super_type, original_card.get("color_identity", [])
                 )
 
-                # Check cache
                 cached = db.get_suggest_cache(
                     deck_id=deck.id, card_id=card.id, threshold=above
                 )
@@ -453,18 +452,7 @@ def suggest(
                         max_suggestions=max_suggestions,
                     )
                     cache_data = json.dumps(
-                        [
-                            {
-                                "original_name": s.original_name,
-                                "original_price": s.original_price,
-                                "suggested_name": s.suggested_name,
-                                "suggested_price": s.suggested_price,
-                                "score": s.score,
-                                "saving": s.saving,
-                                "edhrec_url": s.edhrec_url,
-                            }
-                            for s in suggestions
-                        ]
+                        [dataclasses.asdict(s) for s in suggestions]
                     )
                     db.put_suggest_cache(
                         deck_id=deck.id,

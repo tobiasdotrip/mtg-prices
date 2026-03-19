@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 def test_put_suggest_cache(db):
@@ -42,7 +42,7 @@ def test_get_suggest_cache_expired(db):
     db.put_suggest_cache(
         deck_id=1, card_id=1, threshold=10.0, result_json=json.dumps(data)
     )
-    old_ts = (datetime.now() - timedelta(hours=25)).isoformat()
+    old_ts = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
     db.conn.execute(
         "UPDATE suggest_cache SET created_at = ? WHERE deck_id = 1 AND card_id = 1",
         (old_ts,),

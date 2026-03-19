@@ -174,7 +174,7 @@ def find_suggestions(
         return []
     original_price = float(original_usd_str)
 
-    scored: list[tuple[float, dict]] = []
+    scored: list[tuple[float, float, dict]] = []
     for cand in candidates:
         if cand.get("name") == original_card.get("name"):
             continue
@@ -188,18 +188,17 @@ def find_suggestions(
         if cand_price >= original_price:
             continue
         s = score_candidate(original_card, cand)
-        scored.append((s, cand))
+        scored.append((s, cand_price, cand))
 
-    scored.sort(key=lambda x: (-x[0], float(x[1]["prices"]["usd"])))
+    scored.sort(key=lambda x: (-x[0], x[1]))
 
     results: list[Suggestion] = []
     seen_names: set[str] = set()
-    for s, cand in scored[: max_suggestions * 2]:
+    for s, cand_price, cand in scored[: max_suggestions * 2]:
         name = cand["name"]
         if name in seen_names:
             continue
         seen_names.add(name)
-        cand_price = float(cand["prices"]["usd"])
         edhrec_rank = cand.get("edhrec_rank")
         edhrec_url = (
             f"https://edhrec.com/cards/"

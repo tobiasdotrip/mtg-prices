@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib.resources
 import sqlite3
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from mtg_prices.models import Card, Deck, PriceEntry
@@ -182,12 +182,12 @@ class Database:
         ).fetchall()
         return [Card(id=r[0], name=r[1], oracle_id=r[2], quantity=r[3]) for r in rows]
 
-    def upsert_deck(self, name: str, format: str | None = None) -> int:
-        if format is not None:
+    def upsert_deck(self, name: str, deck_format: str | None = None) -> int:
+        if deck_format is not None:
             self.conn.execute(
                 "INSERT INTO decks (name, format) VALUES (?, ?) "
                 "ON CONFLICT(name) DO UPDATE SET format = excluded.format",
-                (name, format),
+                (name, deck_format),
             )
         else:
             self.conn.execute(
@@ -264,8 +264,8 @@ class Database:
         ).fetchone()
         if row is None:
             return None
-        created_at = datetime.fromisoformat(row[1])
-        if (datetime.now() - created_at).total_seconds() > max_age_hours * 3600:
+        created_at = datetime.fromisoformat(row[1]).replace(tzinfo=timezone.utc)
+        if (datetime.now(timezone.utc) - created_at).total_seconds() > max_age_hours * 3600:
             return None
         return row[0]
 

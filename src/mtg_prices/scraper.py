@@ -190,19 +190,14 @@ class ScryfallClient:
         return None
 
     def _extract_super_type(self, type_line: str) -> str:
-        """Extract main type from a type line."""
-        # Handle double-faced cards
         main_face = type_line.split("//")[0].strip()
-        # Take left side of em-dash (supertypes + type)
         main_part = main_face.split("\u2014")[0].strip()
-        # Match against known types
         for word in main_part.split():
             if word in _KNOWN_SUPER_TYPES:
                 return word
         return main_part
 
     def _build_type_index(self, cards: list[dict[str, Any]]) -> None:
-        """Build index from cards already filtered to English by load_bulk_data."""
         index: dict[str, list[dict[str, Any]]] = {}
         for card in cards:
             type_line = card.get("type_line", "")
