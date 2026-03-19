@@ -353,8 +353,15 @@ def decks() -> None:
     "--top", default=None, type=int, help="Only suggest for top N most expensive cards"
 )
 @click.option("--max-suggestions", default=5, help="Max suggestions per card")
+@click.option(
+    "--include-lands", is_flag=True, default=False, help="Include lands in suggestions"
+)
 def suggest(
-    deck_name: str, above: float, top: int | None, max_suggestions: int
+    deck_name: str,
+    above: float,
+    top: int | None,
+    max_suggestions: int,
+    include_lands: bool,
 ) -> None:
     """Suggest budget alternatives for expensive cards in a deck."""
     from mtg_prices.suggest import find_suggestions
@@ -425,6 +432,8 @@ def suggest(
                 super_type = client._extract_super_type(
                     original_card.get("type_line", "")
                 )
+                if super_type == "Land" and not include_lands:
+                    continue
                 candidates = client.get_candidates(
                     super_type, original_card.get("color_identity", [])
                 )
