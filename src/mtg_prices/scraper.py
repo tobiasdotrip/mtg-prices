@@ -55,11 +55,24 @@ def select_best_price(
     return best
 
 
+_KNOWN_SUPER_TYPES = {
+    "Creature",
+    "Instant",
+    "Sorcery",
+    "Enchantment",
+    "Artifact",
+    "Planeswalker",
+    "Land",
+    "Battle",
+}
+
+
 class ScryfallClient:
     def __init__(self) -> None:
         self._client = httpx.Client(headers=_HEADERS, timeout=30.0)
         self._last_request: float = 0
         self._bulk_index: dict[str, list[dict[str, Any]]] | None = None
+        self._bulk_type_index: dict[str, list[dict[str, Any]]] = {}
 
     def _rate_limit(self) -> None:
         elapsed = time.monotonic() - self._last_request
@@ -121,19 +134,23 @@ class ScryfallClient:
         with open(cache_file, encoding="utf-8") as f:
             cards = json.load(f)
 
+        en_cards: list[dict[str, Any]] = []
         for card_data in cards:
             if card_data.get("lang") != "en":
                 continue
             name = normalize_name(card_data.get("name", ""))
             if name:
                 index.setdefault(name.lower(), []).append(card_data)
+            en_cards.append(card_data)
 
         # Sort each name's prints by release date descending (most recent first)
         for prints in index.values():
             prints.sort(key=lambda c: c.get("released_at", ""), reverse=True)
 
         self._bulk_index = index
+        self._build_type_index(en_cards)
         logger.info("Indexed %d unique card names from bulk data", len(index))
+        logger.info("Built type index with %d super-types", len(self._bulk_type_index))
 
     def search_card(self, name: str) -> dict[str, Any] | None:
         normalized = normalize_name(name)
@@ -173,6 +190,39 @@ class ScryfallClient:
 
         logger.warning("Card not found on Scryfall: %r", name)
         return None
+
+    def _extract_super_type(self, type_line: str) -> str:
+        """Extract main type from a type line."""
+        # Handle double-faced cards
+        main_face = type_line.split("//")[0].strip()
+        # Take left side of em-dash (supertypes + type)
+        main_part = main_face.split("\u2014")[0].strip()
+        # Match against known types
+        for word in main_part.split():
+            if word in _KNOWN_SUPER_TYPES:
+                return word
+        return main_part
+
+    def _build_type_index(self, cards: list[dict[str, Any]]) -> None:
+        """Build index from cards already filtered to English by load_bulk_data."""
+        index: dict[str, list[dict[str, Any]]] = {}
+        for card in cards:
+            type_line = card.get("type_line", "")
+            super_type = self._extract_super_type(type_line)
+            index.setdefault(super_type, []).append(card)
+        self._bulk_type_index = index
+
+    def get_candidates(
+        self, super_type: str, deck_color_identity: list[str]
+    ) -> list[dict[str, Any]]:
+        """Get cards matching type whose color_identity is a subset of deck's colors."""
+        deck_colors = set(deck_color_identity)
+        results = []
+        for card in self._bulk_type_index.get(super_type, []):
+            card_colors = set(card.get("color_identity", []))
+            if card_colors <= deck_colors:
+                results.append(card)
+        return results
 
     def close(self) -> None:
         self._client.close()
