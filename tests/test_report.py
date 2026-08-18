@@ -46,6 +46,28 @@ def test_build_reports(db):
     assert r.trends[30] is None
 
 
+def test_build_reports_anchors_trends_to_latest_price_when_data_is_stale(db):
+    card_id = db.upsert_card(Card(name="Lightning Bolt"))
+    for fetched_at, price in [
+        (date(2026, 3, 9), 2.0),
+        (date(2026, 3, 10), 4.0),
+    ]:
+        db.upsert_price(
+            PriceEntry(
+                card_id=card_id,
+                price_usd=price,
+                price_eur=None,
+                set_code="SET",
+                set_name="Test Set",
+                fetched_at=fetched_at,
+            )
+        )
+
+    reports = build_reports(db, days=[1], currency="usd")
+
+    assert reports[0].trends[1] == 100.0
+
+
 def test_build_reports_null_currency_included(db):
     """Cards with null price in requested currency
     should appear with None, not be skipped."""

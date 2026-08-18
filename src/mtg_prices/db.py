@@ -75,12 +75,16 @@ class Database:
             if version <= current:
                 continue
             sql = mf.read_text(encoding="utf-8")
-            self.conn.executescript(sql)
-            self.conn.execute(
-                "INSERT INTO schema_version (version) VALUES (?)",
-                (version,),
-            )
-            self.conn.commit()
+            try:
+                self.conn.executescript(
+                    f"BEGIN IMMEDIATE;\n{sql}\n"
+                    f"INSERT INTO schema_version (version) VALUES ({version});\n"
+                    "COMMIT;"
+                )
+            except sqlite3.Error:
+                if self.conn.in_transaction:
+                    self.conn.rollback()
+                raise
 
     def close(self) -> None:
         self.conn.close()
@@ -222,6 +226,15 @@ class Database:
         self.conn.execute("DELETE FROM deck_cards WHERE deck_id = ?", (deck_id,))
         self.conn.commit()
 
+    def replace_deck_cards(self, deck_id: int, cards: list[tuple[int, int]]) -> None:
+        with self.conn:
+            self.conn.execute("DELETE FROM deck_cards WHERE deck_id = ?", (deck_id,))
+            self.conn.executemany(
+                "INSERT INTO deck_cards (deck_id, card_id, quantity) VALUES (?, ?, ?) "
+                "ON CONFLICT(deck_id, card_id) DO UPDATE SET quantity = excluded.quantity",
+                ((deck_id, card_id, quantity) for card_id, quantity in cards),
+            )
+
     def get_deck_cards(self, deck_id: int) -> list[Card]:
         rows = self.conn.execute(
             """
@@ -272,7 +285,9 @@ class Database:
         if row is None:
             return None
         created_at = datetime.fromisoformat(row[1]).replace(tzinfo=timezone.utc)
-        if (datetime.now(timezone.utc) - created_at).total_seconds() > max_age_hours * 3600:
+        if (
+            datetime.now(timezone.utc) - created_at
+        ).total_seconds() > max_age_hours * 3600:
             return None
         return row[0]
 

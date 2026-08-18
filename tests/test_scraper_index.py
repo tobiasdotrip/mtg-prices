@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import gzip
+import json
+import os
+
+import httpx
 import pytest
 
 from mtg_prices.scraper import ScryfallClient
@@ -139,3 +144,70 @@ def test_extract_super_type_double_faced(client: ScryfallClient) -> None:
 def test_extract_super_type_legendary(client: ScryfallClient) -> None:
     result = client._extract_super_type("Legendary Creature \u2014 Human Knight")
     assert result == "Creature"
+
+
+def _jsonl_gzip(cards: list[dict]) -> bytes:
+    return gzip.compress("\n".join(json.dumps(card) for card in cards).encode("utf-8"))
+
+
+def test_load_bulk_data_downloads_and_streams_jsonl_gzip(tmp_path) -> None:
+    bulk_url = "https://data.scryfall.io/default-cards.jsonl.gz"
+    seen_requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_requests.append(request)
+        if request.url.path == "/bulk-data/default-cards":
+            return httpx.Response(200, json={"jsonl_download_uri": bulk_url})
+        return httpx.Response(200, content=_jsonl_gzip(MOCK_CARDS))
+
+    client = ScryfallClient()
+    client._client.close()
+    client._client = httpx.Client(transport=httpx.MockTransport(handler))
+    try:
+        client.load_bulk_data(tmp_path)
+    finally:
+        client.close()
+
+    assert (tmp_path / "default-cards.jsonl.gz").exists()
+    assert "swords to plowshares" in client._bulk_index
+    assert "Llanowar Elves" in [
+        card["name"] for card in client._bulk_type_index["Creature"]
+    ]
+    assert [request.url.path for request in seen_requests] == [
+        "/bulk-data/default-cards",
+        "/default-cards.jsonl.gz",
+    ]
+
+
+@pytest.mark.parametrize("download_status", [200, 503])
+def test_invalid_refresh_keeps_and_indexes_stale_cache(
+    tmp_path, download_status
+) -> None:
+    cache_file = tmp_path / "default-cards.jsonl.gz"
+    stale_bytes = _jsonl_gzip(MOCK_CARDS)
+    cache_file.write_bytes(stale_bytes)
+    os.utime(cache_file, (0, 0))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/bulk-data/default-cards":
+            return httpx.Response(
+                200,
+                json={
+                    "jsonl_download_uri": (
+                        "https://data.scryfall.io/default-cards.jsonl.gz"
+                    )
+                },
+            )
+        return httpx.Response(download_status, content=b"not gzip")
+
+    client = ScryfallClient()
+    client._client.close()
+    client._client = httpx.Client(transport=httpx.MockTransport(handler))
+    try:
+        client.load_bulk_data(tmp_path, max_age_hours=0)
+    finally:
+        client.close()
+
+    assert cache_file.read_bytes() == stale_bytes
+    assert "murder" in client._bulk_index
+    assert not list(tmp_path.glob("default-cards-*"))
