@@ -1,6 +1,7 @@
 # mtg-prices
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![CI](https://github.com/tobiasdotrip/mtg-prices/actions/workflows/ci.yml/badge.svg)](https://github.com/tobiasdotrip/mtg-prices/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Scryfall API](https://img.shields.io/badge/data-Scryfall%20API-orange.svg)](https://scryfall.com/docs/api)
 [![SQLite](https://img.shields.io/badge/storage-SQLite-003B57.svg)](https://www.sqlite.org/)
@@ -11,7 +12,7 @@ Feed it a decklist, run it daily, and get price trends for your collection.
 
 ```
 ┌─────┬───────────────────────────┬─────────┬─────┬────────┬────────┬────────┐
-│ Qte │ Carte                     │    Prix │ Ext │     1j │     7j │    30j │
+│ Qty │ Card                      │   Price │ Set │     1d │     7d │    30d │
 ├─────┼───────────────────────────┼─────────┼─────┼────────┼────────┼────────┤
 │   1 │ Sheoldred, the Apocalypse │  $72.35 │ DMU │ +0.4%  │ +3.2%  │ -1.8%  │
 │   1 │ Vampiric Tutor            │  $63.12 │ DMR │ -0.1%  │ +0.5%  │ +2.1%  │
@@ -37,11 +38,27 @@ Feed it a decklist, run it daily, and get price trends for your collection.
 
 ## Installation
 
+Requires Python 3.12 or newer.
+
 ```bash
 git clone https://github.com/tobiasdotrip/mtg-prices.git
 cd mtg-prices
-pip install -e ".[dev]"
+python -m pip install .
+mtg-prices --version
 ```
+
+## Quickstart
+
+Create a `cards.txt` decklist using the format below, then run:
+
+```bash
+mtg-prices fetch cards.txt --deck "My Deck" --format commander
+mtg-prices report --deck "My Deck"
+mtg-prices suggest "My Deck"
+mtg-prices update --deck "My Deck"
+```
+
+The first fetch downloads Scryfall's bulk card data and may take a moment.
 
 ## Usage
 
@@ -62,23 +79,23 @@ Lines starting with `#` are comments. Empty lines are ignored.
 
 ```bash
 # Fetch prices for a decklist
-python -m mtg_prices fetch cards.txt
+mtg-prices fetch cards.txt
 
 # Associate with a named deck
-python -m mtg_prices fetch cards.txt --deck "Vito EDH"
+mtg-prices fetch cards.txt --deck "Vito EDH"
 
 # Specify a format (default: commander)
-python -m mtg_prices fetch cards.txt --deck "Vito EDH" --format commander
+mtg-prices fetch cards.txt --deck "Vito EDH" --format commander
 ```
 
 ### Update prices
 
 ```bash
 # Update all tracked cards
-python -m mtg_prices update
+mtg-prices update
 
 # Update a specific deck only
-python -m mtg_prices update --deck "Vito EDH"
+mtg-prices update --deck "Vito EDH"
 ```
 
 Price deltas are shown for each card:
@@ -93,36 +110,36 @@ Price deltas are shown for each card:
 
 ```bash
 # Report for all tracked cards
-python -m mtg_prices report
+mtg-prices report
 
 # Report for a specific deck
-python -m mtg_prices report --deck "Vito EDH"
+mtg-prices report --deck "Vito EDH"
 
 # EUR prices, custom trend windows
-python -m mtg_prices report --currency eur --days 1,7,30,90
+mtg-prices report --currency eur --days 1,7,30,90
 
 # Skip basic lands
-python -m mtg_prices report --skip-basics
+mtg-prices report --skip-basics
 
 # Export
-python -m mtg_prices report --format csv --output prices.csv
-python -m mtg_prices report --format json
+mtg-prices report --format csv --output prices.csv
+mtg-prices report --format json
 ```
 
 ### Budget suggestions
 
 ```bash
 # Suggest cheaper alternatives for cards above $10
-python -m mtg_prices suggest "Vito EDH"
+mtg-prices suggest "Vito EDH"
 
 # Custom threshold
-python -m mtg_prices suggest "Vito EDH" --above 20.00
+mtg-prices suggest "Vito EDH" --above 20.00
 
 # Top 5 most expensive only, max 3 suggestions each
-python -m mtg_prices suggest "Vito EDH" --top 5 --max-suggestions 3
+mtg-prices suggest "Vito EDH" --top 5 --max-suggestions 3
 
 # Include lands (excluded by default)
-python -m mtg_prices suggest "Vito EDH" --include-lands
+mtg-prices suggest "Vito EDH" --include-lands
 ```
 
 Suggestions are scored by functional role, oracle text similarity, CMC, keywords, EDHREC popularity, and power/toughness. Accept swaps interactively by entering suggestion numbers, `all`, or Enter to skip.
@@ -131,10 +148,10 @@ Suggestions are scored by functional role, oracle text similarity, CMC, keywords
 
 ```bash
 # List all decks
-python -m mtg_prices decks
+mtg-prices decks
 
 # List cards in a deck
-python -m mtg_prices list --deck "Vito EDH"
+mtg-prices list --deck "Vito EDH"
 ```
 
 ### Automate with cron
@@ -142,9 +159,21 @@ python -m mtg_prices list --deck "Vito EDH"
 Scryfall updates prices once daily. Schedule an update:
 
 ```bash
+# Find the absolute path to the installed command
+command -v mtg-prices
+
 # crontab -e
-30 9 * * * cd /path/to/mtg-prices && python -m mtg_prices update
+30 9 * * * /absolute/path/to/mtg-prices update
 ```
+
+### Data and logs
+
+Application data is stored in `$XDG_DATA_HOME/mtg-prices` when
+`XDG_DATA_HOME` is set, or in `~/.local/share/mtg-prices` otherwise. This
+directory contains the SQLite database, the cached Scryfall bulk data,
+`errors.log`, and exports created without an explicit `--output` path.
+
+Back up `mtg_prices.db` to preserve deck and price history.
 
 ## How it works
 
@@ -170,10 +199,19 @@ src/mtg_prices/
   migrations/   # Numbered SQL migration files
 ```
 
-## Running tests
+## Development
 
 ```bash
+git clone https://github.com/tobiasdotrip/mtg-prices.git
+cd mtg-prices
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
+
+ruff check .
+ruff format --check .
 pytest -v
+python -m build
 ```
 
 ## Built with

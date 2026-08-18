@@ -23,7 +23,7 @@ from mtg_prices.report import (
     export_json,
     print_table,
 )
-from mtg_prices.scraper import ScryfallClient, normalize_name
+from mtg_prices.scraper import ScryfallClient, normalize_name, select_best_price
 
 
 def _default_data_dir() -> Path:
@@ -37,7 +37,7 @@ def _make_console() -> Console:
     """Create a Rich Console that works on Windows/PowerShell."""
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    return Console(force_terminal=True)
+    return Console()
 
 
 console = _make_console()
@@ -68,6 +68,38 @@ def _setup_logging() -> None:
     root.setLevel(logging.INFO)
     root.addHandler(file_handler)
     root.addHandler(console_handler)
+
+
+def _parse_days(value: str) -> list[int]:
+    try:
+        days = [int(day.strip()) for day in value.split(",")]
+    except ValueError as exc:
+        raise click.BadParameter(
+            "must be a comma-separated list of positive integers",
+            param_hint="--days",
+        ) from exc
+    if not days or any(day < 1 for day in days):
+        raise click.BadParameter(
+            "must be a comma-separated list of positive integers",
+            param_hint="--days",
+        )
+    return days
+
+
+def _select_reference_print(prints: list[dict]) -> dict | None:
+    selected = select_best_price(prints)
+    if selected is None:
+        return None
+    return next(
+        (
+            card
+            for card in prints[:5]
+            if card.get("set") == selected["set_code"]
+            and card.get("prices", {}).get("usd") is not None
+            and float(card["prices"]["usd"]) == selected["price_usd"]
+        ),
+        None,
+    )
 
 
 @click.group()
@@ -103,10 +135,8 @@ def fetch(decklist: Path, deck: str | None, deck_format: str) -> None:
     console.print("[dim]Loading Scryfall bulk data...[/dim]")
     client.load_bulk_data(_default_data_dir())
 
-    deck_id = None
+    resolved_deck_cards: list[tuple[int, int]] = []
     if deck:
-        deck_id = db.upsert_deck(deck, deck_format=deck_format)
-        db.clear_deck(deck_id)
         console.print(f"[bold]Deck:[/bold] {deck}\n")
 
     today = date.today()
@@ -123,8 +153,8 @@ def fetch(decklist: Path, deck: str | None, deck_format: str) -> None:
             card.oracle_id = result.get("oracle_id")
             card_id = db.upsert_card(card)
 
-            if deck_id is not None:
-                db.add_card_to_deck(deck_id, card_id, card.quantity)
+            if deck:
+                resolved_deck_cards.append((card_id, card.quantity))
 
             entry = PriceEntry(
                 card_id=card_id,
@@ -139,11 +169,23 @@ def fetch(decklist: Path, deck: str | None, deck_format: str) -> None:
             console.print(
                 f"  [green]OK[/green] {card.name} -- ${result.get('price_usd', '?')}"
             )
+
+        if errors == 0 and deck:
+            deck_id = db.upsert_deck(deck, deck_format=deck_format)
+            if deck_id is not None:
+                db.replace_deck_cards(deck_id, resolved_deck_cards)
+        if fetched > 0:
+            db.clear_suggest_cache()
     finally:
         client.close()
         db.close()
 
     console.print(f"\n[bold]Fetched {fetched} cards, {errors} errors.[/bold]")
+    if errors:
+        message = "Fetch incomplete because not every card could be resolved."
+        if deck:
+            message += " The existing deck was preserved."
+        raise click.ClickException(message)
 
 
 @main.command()
@@ -157,8 +199,7 @@ def update(deck: str | None) -> None:
         if deck:
             deck_obj = db.get_deck_by_name(deck)
             if deck_obj is None:
-                console.print(f"[red]Deck '{deck}' not found.[/red]")
-                return
+                raise click.ClickException(f"Deck '{deck}' not found.")
             cards = db.get_deck_cards(deck_obj.id)
             console.print(f"[bold]Deck:[/bold] {deck}\n")
         else:
@@ -244,7 +285,7 @@ def report(
     deck: str | None,
 ) -> None:
     """Show price trends for tracked cards."""
-    day_list = [int(d.strip()) for d in days.split(",")]
+    day_list = _parse_days(days)
 
     db = Database(_get_db_path())
     db.init()
@@ -254,8 +295,7 @@ def report(
         if deck:
             deck_obj = db.get_deck_by_name(deck)
             if deck_obj is None:
-                console.print(f"[red]Deck '{deck}' not found.[/red]")
-                return
+                raise click.ClickException(f"Deck '{deck}' not found.")
             card_list = db.get_deck_cards(deck_obj.id)
 
         reports = build_reports(
@@ -303,8 +343,7 @@ def list_cards(deck: str | None) -> None:
         if deck:
             deck_obj = db.get_deck_by_name(deck)
             if deck_obj is None:
-                console.print(f"[red]Deck '{deck}' not found.[/red]")
-                return
+                raise click.ClickException(f"Deck '{deck}' not found.")
             cards = db.get_deck_cards(deck_obj.id)
             label = f"Deck: {deck}"
         else:
@@ -347,12 +386,23 @@ def decks() -> None:
 @main.command()
 @click.argument("deck_name")
 @click.option(
-    "--above", default=10.0, help="Only suggest for cards above this price (USD)"
+    "--above",
+    default=10.0,
+    type=click.FloatRange(min=0),
+    help="Only suggest for cards above this price (USD)",
 )
 @click.option(
-    "--top", default=None, type=int, help="Only suggest for top N most expensive cards"
+    "--top",
+    default=None,
+    type=click.IntRange(min=1),
+    help="Only suggest for top N most expensive cards",
 )
-@click.option("--max-suggestions", default=5, help="Max suggestions per card")
+@click.option(
+    "--max-suggestions",
+    default=5,
+    type=click.IntRange(min=1, max=20),
+    help="Max suggestions per card",
+)
 @click.option(
     "--include-lands", is_flag=True, default=False, help="Include lands in suggestions"
 )
@@ -372,8 +422,7 @@ def suggest(
     try:
         deck = db.get_deck_by_name(deck_name)
         if deck is None:
-            console.print(f"[red]Deck '{deck_name}' not found.[/red]")
-            return
+            raise click.ClickException(f"Deck '{deck_name}' not found.")
 
         cards = db.get_deck_cards(deck.id)
         if not cards:
@@ -430,7 +479,9 @@ def suggest(
                 )
                 if not bulk_prints:
                     continue
-                original_card = bulk_prints[0]
+                original_card = _select_reference_print(bulk_prints)
+                if original_card is None:
+                    continue
 
                 super_type = client._extract_super_type(
                     original_card.get("type_line", "")
@@ -452,7 +503,7 @@ def suggest(
                         original_card=original_card,
                         candidates=candidates,
                         deck_format=deck.format,
-                        max_suggestions=max_suggestions,
+                        max_suggestions=20,
                     )
                     cache_data = json.dumps(
                         [dataclasses.asdict(s) for s in suggestions]
@@ -463,6 +514,7 @@ def suggest(
                         threshold=above,
                         result_json=cache_data,
                     )
+                suggestions = suggestions[:max_suggestions]
 
                 if not suggestions:
                     table.add_row(
@@ -475,9 +527,9 @@ def suggest(
                     )
                     continue
 
+                total_saving += suggestions[0].saving
                 for i, s in enumerate(suggestions):
                     suggestion_num += 1
-                    total_saving += s.saving
                     numbered_suggestions.append((card, s))
                     table.add_row(
                         str(suggestion_num),
@@ -505,7 +557,12 @@ def suggest(
             return
 
         if choice.lower() == "all":
-            selected = set(range(1, len(numbered_suggestions) + 1))
+            selected = set()
+            seen_card_ids: set[int | None] = set()
+            for num, (card, _) in enumerate(numbered_suggestions, 1):
+                if card.id not in seen_card_ids:
+                    selected.add(num)
+                    seen_card_ids.add(card.id)
         else:
             try:
                 selected = {int(n.strip()) for n in choice.split(",")}
@@ -514,15 +571,23 @@ def suggest(
                 return
 
         swapped = 0
+        swapped_card_ids: set[int | None] = set()
         for num in sorted(selected):
             if num < 1 or num > len(numbered_suggestions):
                 console.print(f"[yellow]#{num} out of range, skipped.[/yellow]")
                 continue
             original_card_obj, suggestion = numbered_suggestions[num - 1]
+            if original_card_obj.id in swapped_card_ids:
+                console.print(
+                    f"[yellow]Only one suggestion can replace "
+                    f"{original_card_obj.name}; #{num} skipped.[/yellow]"
+                )
+                continue
             new_card = Card(name=suggestion.suggested_name)
             new_card_id = db.upsert_card(new_card)
             db.remove_card_from_deck(deck.id, original_card_obj.id)
             db.add_card_to_deck(deck.id, new_card_id, original_card_obj.quantity)
+            swapped_card_ids.add(original_card_obj.id)
             swapped += 1
             console.print(
                 f"  [green]✓[/green] {original_card_obj.name} → {suggestion.suggested_name}"

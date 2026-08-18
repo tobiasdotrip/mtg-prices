@@ -1,4 +1,7 @@
+import sqlite3
 from datetime import date
+
+import pytest
 
 from mtg_prices.models import Card, PriceEntry
 from mtg_prices.report import build_reports
@@ -32,6 +35,29 @@ def test_add_card_to_deck_update_quantity(db):
     db.add_card_to_deck(deck_id, card_id, 2)
     cards = db.get_deck_cards(deck_id)
     assert cards[0].quantity == 2
+
+
+def test_replace_deck_cards_is_atomic(db):
+    deck_id = db.upsert_deck("Vito EDH")
+    old_card_id = db.upsert_card(Card(name="Old Card"))
+    new_card_id = db.upsert_card(Card(name="New Card"))
+    db.add_card_to_deck(deck_id, old_card_id, 1)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.replace_deck_cards(deck_id, [(new_card_id, 2), (999_999, 1)])
+
+    cards = db.get_deck_cards(deck_id)
+    assert [(card.name, card.quantity) for card in cards] == [("Old Card", 1)]
+
+
+def test_replace_deck_cards_keeps_last_duplicate_quantity(db):
+    deck_id = db.upsert_deck("Vito EDH")
+    card_id = db.upsert_card(Card(name="Lightning Bolt"))
+
+    db.replace_deck_cards(deck_id, [(card_id, 1), (card_id, 4)])
+
+    cards = db.get_deck_cards(deck_id)
+    assert [(card.name, card.quantity) for card in cards] == [("Lightning Bolt", 4)]
 
 
 def test_get_all_decks(db):

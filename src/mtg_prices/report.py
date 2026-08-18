@@ -5,7 +5,7 @@ import io
 import json
 import logging
 import sys
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from rich.console import Console
 from rich.table import Table
@@ -42,7 +42,7 @@ def build_reports(
     today: date | None = None,
     card_list: list | None = None,
 ) -> list[CardReport]:
-    today = today or date.today()
+    current_date = today or datetime.now(UTC).date()
     price_field = f"price_{currency}"
     cards = card_list if card_list is not None else db.get_all_cards()
     reports: list[CardReport] = []
@@ -53,7 +53,7 @@ def build_reports(
         latest = db.get_latest_price(card.id)
         if latest is None:
             continue
-        if latest.fetched_at != today:
+        if latest.fetched_at != current_date:
             logger.info(
                 "Latest price for %r is from %s, not today",
                 card.name,
@@ -64,9 +64,10 @@ def build_reports(
             logger.warning("No %s price for %r", currency.upper(), card.name)
 
         trends: dict[int, float | None] = {}
+        reference_date = today or latest.fetched_at
         if current_price is not None:
             for d in days:
-                target = today - timedelta(days=d)
+                target = reference_date - timedelta(days=d)
                 old = db.get_price_at(card.id, target, tolerance_days=2)
                 if old is None:
                     trends[d] = None
@@ -105,15 +106,15 @@ def print_table(
     symbol = CURRENCY_SYMBOLS.get(currency, "$")
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    console = Console(force_terminal=True)
+    console = Console()
     table = Table(show_footer=True, title=title)
 
-    table.add_column("Qte", justify="right", footer="")
-    table.add_column("Carte", footer="TOTAL")
-    table.add_column("Prix", justify="right", footer="")
-    table.add_column("Ext", justify="center")
+    table.add_column("Qty", justify="right", footer="")
+    table.add_column("Card", footer="TOTAL")
+    table.add_column("Price", justify="right", footer="")
+    table.add_column("Set", justify="center")
     for d in days:
-        table.add_column(f"{d}j", justify="right")
+        table.add_column(f"{d}d", justify="right")
 
     price_attr = f"price_{currency}"
     total_price = 0.0

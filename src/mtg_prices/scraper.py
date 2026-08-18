@@ -1,22 +1,28 @@
 from __future__ import annotations
 
+import gzip
 import json
 import logging
+import os
+import tempfile
 import time
 import unicodedata
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
+
+from mtg_prices import __version__
 
 logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://api.scryfall.com"
 _HEADERS = {
-    "User-Agent": "mtg-prices/0.4.0",
+    "User-Agent": f"mtg-prices/{__version__}",
     "Accept": "application/json",
 }
-_REQUEST_DELAY = 0.1  # 100ms between requests
+_CARD_REQUEST_DELAY = 0.5
 
 
 def normalize_name(name: str) -> str:
@@ -76,15 +82,25 @@ class ScryfallClient:
 
     def _rate_limit(self) -> None:
         elapsed = time.monotonic() - self._last_request
-        if elapsed < _REQUEST_DELAY:
-            time.sleep(_REQUEST_DELAY - elapsed)
+        if elapsed < _CARD_REQUEST_DELAY:
+            time.sleep(_CARD_REQUEST_DELAY - elapsed)
         self._last_request = time.monotonic()
 
     def _get(self, url: str, params: dict[str, str] | None = None) -> httpx.Response:
-        self._rate_limit()
         for attempt in range(3):
+            if url.endswith(("/cards/search", "/cards/named")):
+                self._rate_limit()
             resp = self._client.get(url, params=params)
-            if resp.status_code == 429 or resp.status_code >= 500:
+            if resp.status_code == 429:
+                retry_after = resp.headers.get("Retry-After")
+                try:
+                    wait = float(retry_after) if retry_after is not None else 30.0
+                except ValueError:
+                    wait = 30.0
+                logger.warning("Scryfall 429, retrying in %gs...", wait)
+                time.sleep(wait)
+                continue
+            if resp.status_code >= 500:
                 wait = 2**attempt
                 logger.warning(
                     "Scryfall %d, retrying in %ds...", resp.status_code, wait
@@ -98,57 +114,119 @@ class ScryfallClient:
         """Download Scryfall 'Default Cards' bulk file,
         cache it, and build a name index."""
         cache_dir.mkdir(parents=True, exist_ok=True)
-        cache_file = cache_dir / "default-cards.json"
+        cache_file = cache_dir / "default-cards.jsonl.gz"
 
-        need_download = True
-        if cache_file.exists():
+        need_download = not cache_file.exists()
+        if not need_download:
             age_hours = (time.time() - cache_file.stat().st_mtime) / 3600
-            if age_hours < max_age_hours:
-                need_download = False
+            need_download = age_hours >= max_age_hours
+            if not need_download:
                 logger.info("Using cached bulk data (%.1fh old)", age_hours)
 
+        downloaded_file: Path | None = None
         if need_download:
-            logger.info("Fetching bulk data download URL...")
-            meta_resp = self._get(f"{_BASE_URL}/bulk-data/default-cards")
-            if meta_resp.status_code != 200:
-                logger.warning(
-                    "Could not fetch bulk data metadata, falling back to API"
-                )
-                return
-            download_uri = meta_resp.json()["download_uri"]
-
-            logger.info("Downloading bulk data...")
-            with (
-                self._client.stream("GET", download_uri) as stream,
-                open(cache_file, "wb") as f,
+            try:
+                downloaded_file = self._download_bulk_data(cache_dir)
+            except (
+                httpx.HTTPError,
+                json.JSONDecodeError,
+                KeyError,
+                OSError,
+                ValueError,
             ):
-                for chunk in stream.iter_bytes(chunk_size=1024 * 64):
-                    f.write(chunk)
-            logger.info("Bulk data saved to %s", cache_file)
+                logger.warning(
+                    "Could not refresh bulk data; using stale cache if available",
+                    exc_info=True,
+                )
 
         logger.info("Indexing bulk data...")
-
-        index: dict[str, list[dict[str, Any]]] = {}
-        with open(cache_file, encoding="utf-8") as f:
-            cards = json.load(f)
-
-        en_cards: list[dict[str, Any]] = []
-        for card_data in cards:
-            if card_data.get("lang") != "en":
-                continue
-            name = normalize_name(card_data.get("name", ""))
-            if name:
-                index.setdefault(name.lower(), []).append(card_data)
-                en_cards.append(card_data)
-
-        # Sort each name's prints by release date descending (most recent first)
-        for prints in index.values():
-            prints.sort(key=lambda c: c.get("released_at", ""), reverse=True)
+        source_file = downloaded_file or cache_file
+        try:
+            index, type_index = self._read_bulk_indexes(source_file)
+            if downloaded_file is not None:
+                os.replace(downloaded_file, cache_file)
+                downloaded_file = None
+                logger.info("Bulk data saved to %s", cache_file)
+        except (
+            gzip.BadGzipFile,
+            json.JSONDecodeError,
+            OSError,
+            UnicodeError,
+            ValueError,
+        ):
+            logger.warning("Could not index refreshed bulk data", exc_info=True)
+            if downloaded_file is not None:
+                downloaded_file.unlink(missing_ok=True)
+                downloaded_file = None
+            if source_file == cache_file or not cache_file.exists():
+                return
+            try:
+                index, type_index = self._read_bulk_indexes(cache_file)
+            except (
+                gzip.BadGzipFile,
+                json.JSONDecodeError,
+                OSError,
+                UnicodeError,
+                ValueError,
+            ):
+                logger.warning("Could not index stale bulk data", exc_info=True)
+                return
 
         self._bulk_index = index
-        self._build_type_index(en_cards)
+        self._bulk_type_index = type_index
         logger.info("Indexed %d unique card names from bulk data", len(index))
         logger.info("Built type index with %d super-types", len(self._bulk_type_index))
+
+    def _download_bulk_data(self, cache_dir: Path) -> Path:
+        logger.info("Fetching bulk data download URL...")
+        meta_resp = self._get(f"{_BASE_URL}/bulk-data/default-cards")
+        meta_resp.raise_for_status()
+        download_uri = meta_resp.json()["jsonl_download_uri"]
+        if not isinstance(download_uri, str) or not urlparse(
+            download_uri
+        ).path.endswith(".jsonl.gz"):
+            raise ValueError("Scryfall bulk data URL is not a .jsonl.gz file")
+
+        fd, filename = tempfile.mkstemp(prefix="default-cards-", dir=cache_dir)
+        os.close(fd)
+        temp_file = Path(filename)
+        try:
+            logger.info("Downloading bulk data...")
+            with self._client.stream("GET", download_uri) as stream:
+                stream.raise_for_status()
+                with temp_file.open("wb") as output:
+                    for chunk in stream.iter_bytes(chunk_size=1024 * 64):
+                        output.write(chunk)
+        except Exception:
+            temp_file.unlink(missing_ok=True)
+            raise
+        return temp_file
+
+    def _read_bulk_indexes(
+        self, path: Path
+    ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]:
+        name_index: dict[str, list[dict[str, Any]]] = {}
+        type_index: dict[str, list[dict[str, Any]]] = {}
+        with gzip.open(path, "rt", encoding="utf-8") as bulk_file:
+            for line in bulk_file:
+                if not line.strip():
+                    continue
+                card_data = json.loads(line)
+                if not isinstance(card_data, dict):
+                    raise ValueError("Scryfall bulk data record is not an object")
+                if card_data.get("lang") != "en":
+                    continue
+                name = normalize_name(card_data.get("name", ""))
+                if name:
+                    name_index.setdefault(name.lower(), []).append(card_data)
+                    super_type = self._extract_super_type(
+                        card_data.get("type_line", "")
+                    )
+                    type_index.setdefault(super_type, []).append(card_data)
+
+        for prints in name_index.values():
+            prints.sort(key=lambda c: c.get("released_at", ""), reverse=True)
+        return name_index, type_index
 
     def search_card(self, name: str) -> dict[str, Any] | None:
         normalized = normalize_name(name)

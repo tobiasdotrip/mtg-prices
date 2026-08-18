@@ -78,9 +78,7 @@ def classify_roles(oracle_text: str | None) -> set[str]:
     return roles
 
 
-def score_roles(
-    original_text: str | None, candidate_text: str | None
-) -> int:
+def score_roles(original_text: str | None, candidate_text: str | None) -> int:
     """Score based on shared functional roles. 3 per shared role, cap 6."""
     orig_roles = classify_roles(original_text)
     cand_roles = classify_roles(candidate_text)
