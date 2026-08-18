@@ -37,7 +37,7 @@ def _make_console() -> Console:
     """Create a Rich Console that works on Windows/PowerShell."""
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    return Console(force_terminal=True)
+    return Console()
 
 
 console = _make_console()

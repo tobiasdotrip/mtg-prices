@@ -106,7 +106,7 @@ def print_table(
     symbol = CURRENCY_SYMBOLS.get(currency, "$")
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    console = Console(force_terminal=True)
+    console = Console()
     table = Table(show_footer=True, title=title)
 
     table.add_column("Qty", justify="right", footer="")
